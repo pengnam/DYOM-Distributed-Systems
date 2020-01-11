@@ -20,7 +20,7 @@ type Master struct {
 
 // Your code here -- RPC handlers for the worker to call.
 
-func (m *Master) Poll(args *ExampleArgs, reply *ExampleReply) error {
+func (m *Master) Poll(args *GetJob, reply *PollResponse) error {
 	reply.Y = args.X + 1
 	return nil
 }

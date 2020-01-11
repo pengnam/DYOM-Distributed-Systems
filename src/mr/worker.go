@@ -1,10 +1,24 @@
 package mr
 
-import "fmt"
+import (
+	"fmt"
+	"io/ioutil"
+	"os"
+	"encoding/gob"
+	"sort"
+)
 import "log"
 import "net/rpc"
 import "hash/fnv"
 
+
+// for sorting by key.
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 //
 // Map functions return a slice of KeyValue.
@@ -28,32 +42,119 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
-	// Your worker implementation here.
-
-	// uncomment to send the Example RPC to the master.
-	CallExample()
-
+	for {
+		job := GetJobFromServer()
+		switch job.jobType {
+		case MapJob:
+			handleMapJob(mapf, job)
+		case ReduceJob:
+			fmt.Println("Reduce job")
+		default:
+			log.Fatalf("Neither map or reduce")
+		}
+	}
 }
 
-//
-// example function to show how to make an RPC call to the master.
-//
-func CallExample() {
+func openFile(filename string) string {
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatalf("cannot open %v", filename)
+	}
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", filename)
+	}
+	file.Close()
+	return string(content)
+}
+
+func handleMapJob (mapf func (string, string) []KeyValue, job Job) {
+	fmt.Println("Map job")
+
+	kva := mapf(job.filename, openFile(job.filename))
+
+	result := partition(kva)
+	for i, val := range result {
+		saveKva(val, "test-"+string(i) + "-" + string(job.id))
+	}
+}
+
+func partition(kva []KeyValue) [][]KeyValue{
+	var result [][]KeyValue
+	result = make([][]KeyValue, 10)
+	for _, kv := range kva {
+		hash := ihash(kv.Key)
+		result[hash] = append(result[hash], kv)
+	}
+	return result
+}
+
+func saveKva(kva []KeyValue, outputFilename string) {
+	f, err := os.Create(outputFilename)
+	if err != nil {
+		log.Fatalf("cannot create %v", outputFilename)
+	}
+	encoder := gob.NewEncoder(f)
+	err = encoder.Encode(kva)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func openKva(filename string) []KeyValue{
+	var kva []KeyValue
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatalf("cannot open %v", filename)
+	}
+	decoder := gob.NewDecoder(file)
+	decoder.Decode(&kva)
+	return kva
+}
+
+func handleReduceJob(reducef func(string, []string) string, job Job) {
+	oname := "mr-out-" + string(job.id)
+	ofile, _ := os.Create(oname)
+	intermediate := []KeyValue{}
+	for i := 0; i < 10; i++ {
+		intermediate = append(intermediate, openKva("test-" + string(job.id) + "-" + string(i))...)
+	}
+	sort.Sort(ByKey(intermediate))
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+
+		i = j
+	}
+}
+
+func GetJobFromServer() Job {
 
 	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
+	args := GetJobRequest{}
 
 	// declare a reply structure.
-	reply := ExampleReply{}
+	reply := GetJobResponse{}
 
 	// send the RPC request, wait for the reply.
-	call("Master.Poll", &args, &reply)
+	call("Master.GetJob", &args, &reply)
 
-	// reply.Y should be 100.
-	fmt.Printf("reply.Y %v\n", reply.Y)
+	return reply.job
+}
+
+func DeclareFinish() {
+
 }
 
 //

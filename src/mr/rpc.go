@@ -4,18 +4,25 @@ package mr
 // RPC definitions.
 //
 
-//
-// example to show how to declare the arguments
-// and reply for an RPC.
-//
+type GetJobRequest struct {}
 
-type ExampleArgs struct {
-	X int
+type GetJobResponse struct {
+	job Job
 }
 
-type ExampleReply struct {
-	Y int
+type Job struct {
+	jobType JobType
+	filename string
+	id int
 }
 
-// Add your RPC definitions here.
+type JobType int
 
+const (
+	MapJob JobType = iota
+	ReduceJob JobType = iota
+)
+
+type MarkJobCompletedRequest struct {}
+
+type MarkJobCompletedResponse struct {}
