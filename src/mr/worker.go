@@ -31,7 +31,7 @@ func Worker(mapf func(string, string) []KeyValue,
 	// Your worker implementation here.
 
 	// uncomment to send the Example RPC to the master.
-	// CallExample()
+	CallExample()
 
 }
 
