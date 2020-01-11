@@ -6,18 +6,21 @@ import "os"
 import "net/rpc"
 import "net/http"
 
+type WorkerStatus int
+
+const (
+	Idle WorkerStatus = iota
+	Working WorkerStatus = iota
+)
+
 
 type Master struct {
-	// Your definitions here.
-
+	workers map[string]WorkerStatus
 }
 
 // Your code here -- RPC handlers for the worker to call.
 
-//
-// an example RPC handler.
-//
-func (m *Master) Example(args *ExampleArgs, reply *ExampleReply) error {
+func (m *Master) Poll(args *ExampleArgs, reply *ExampleReply) error {
 	reply.Y = args.X + 1
 	return nil
 }
