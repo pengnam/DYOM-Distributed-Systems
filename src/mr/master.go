@@ -24,13 +24,14 @@ type Master struct {
 // TODO: Add sync primitives
 // TODO: Add timeout
 func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error {
+	m.Lock()
 	m.CheckState()
 	if m.hasNoUndoneTasks(){
 		// There should not be undone
 		response.Job = Job{
 			JobType: m.phase,
 		}
-
+		m.Unlock()
 		return nil
 	}
 	e := m.taskQueue.Front()
@@ -46,13 +47,17 @@ func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error 
 	if m.phase == MapJob {
 		response.Job.Filename = m.files[taskId]
 	}
+	m.Unlock()
 	return nil
 }
 
 func (m *Master) MarkJobCompleted (request *MarkJobCompletedRequest, response *MarkJobCompletedResponse) {
+	m.Lock()
 	delete(m.ongoingTasks, request.job.Id)
+	m.Unlock()
 }
 
+// Not thread safe
 func (m *Master) CheckState() {
 	fmt.Println(m.taskQueue)
 	switch (m.phase) {
@@ -67,17 +72,19 @@ func (m *Master) CheckState() {
 	}
 }
 
+// Not thread safe
 func (m *Master) initialiseReducePhase() {
 	m.phase = ReduceJob
 	for i := 0; i < m.numReduces; i++ {
 		m.taskQueue.PushBack(i)
 	}
 }
-
+// Not thread safe
 func (m *Master) hasNoUndoneTasks() bool {
 	return m.taskQueue.Len() == 0
 }
 
+// Not thread safe
 func (m *Master) hasNoTasks() bool {
 	return m.hasNoUndoneTasks() && len(m.ongoingTasks) == 0
 }
@@ -102,7 +109,10 @@ func (m *Master) server() {
 // if the entire Job has finished.
 //
 func (m *Master) Done() bool {
-	return m.phase == ReduceJob && m.hasNoTasks()
+	m.Lock()
+	status := m.phase == ReduceJob && m.hasNoTasks()
+	m.Unlock()
+	return status
 }
 
 //
