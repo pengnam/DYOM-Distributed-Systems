@@ -2,6 +2,7 @@ package mr
 
 import (
 	"container/list"
+	"fmt"
 	"log"
 	"sync"
 )
@@ -25,9 +26,11 @@ type Master struct {
 func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error {
 	m.CheckState()
 	if m.hasNoUndoneTasks(){
+		// There should not be undone
 		response.Job = Job{
-			JobType: Idle,
+			JobType: m.phase,
 		}
+
 		return nil
 	}
 	e := m.taskQueue.Front()
@@ -51,6 +54,7 @@ func (m *Master) MarkJobCompleted (request *MarkJobCompletedRequest, response *M
 }
 
 func (m *Master) CheckState() {
+	fmt.Println(m.taskQueue)
 	switch (m.phase) {
 	case MapJob:
 		if m.hasNoTasks() {
@@ -58,7 +62,7 @@ func (m *Master) CheckState() {
 		}
 	case ReduceJob:
 		if m.hasNoTasks() {
-			m.phase = Idle
+			m.phase = Done
 		}
 	}
 }

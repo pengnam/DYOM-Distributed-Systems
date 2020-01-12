@@ -24,6 +24,7 @@ const (
 	Idle JobType = iota
 	MapJob JobType = iota
 	ReduceJob JobType = iota
+	Done JobType = iota
 )
 
 type MarkJobCompletedRequest struct {
