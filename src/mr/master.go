@@ -146,6 +146,7 @@ func (m *Master) Done() bool {
 func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{
 		taskQueue: list.New(),
+		ongoingTasks: make(map[int]chan int),
 		files: files,
 		numReduces: nReduce,
 		numMaps:len(files),
