@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 )
 import "net"
 import "os"
@@ -14,14 +15,13 @@ import "net/http"
 
 type Master struct {
 	taskQueue *list.List
-	ongoingTasks map[int]bool
+	ongoingTasks map[int]chan int
 	files []string
 	phase JobType
 	numReduces int
 	numMaps int
 	sync.Mutex
 }
-// TODO: Add sync primitives
 // TODO: Add timeout
 func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error {
 	m.Lock()
@@ -51,9 +51,29 @@ func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error 
 	return nil
 }
 
+func (m *Master) createTimeout(jobId int) {
+	c := make(chan int)
+	t := time.After(5 * time.Second)
+	go func() {
+		select {
+			case <- t:
+				m.Lock()
+				delete(m.ongoingTasks, jobId)
+				m.taskQueue.PushBack(jobId)
+				m.Unlock()
+			case <- c:
+				m.Lock()
+				delete(m.ongoingTasks, jobId)
+				m.Unlock()
+		}
+	}()
+}
+
 func (m *Master) MarkJobCompleted (request *MarkJobCompletedRequest, response *MarkJobCompletedResponse) {
 	m.Lock()
-	delete(m.ongoingTasks, request.job.Id)
+	if _, ok := m.ongoingTasks[request.job.Id]; ok {
+		m.ongoingTasks[request.job.Id] <- 1
+	}
 	m.Unlock()
 }
 
