@@ -2,7 +2,6 @@ package mr
 
 import (
 	"container/list"
-	"fmt"
 	"log"
 	"sync"
 )
@@ -24,10 +23,8 @@ type Master struct {
 // TODO: Add sync primitives
 // TODO: Add timeout
 func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error {
-	fmt.Println("A")
 	m.CheckState()
 	if m.hasNoUndoneTasks(){
-		fmt.Println("B")
 		response.Job = Job{
 			JobType: Idle,
 		}
@@ -46,7 +43,6 @@ func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error 
 	if m.phase == MapJob {
 		response.Job.Filename = m.files[taskId]
 	}
-	fmt.Println("C")
 	return nil
 }
 

@@ -53,7 +53,6 @@ func Worker(mapf func(string, string) []KeyValue,
 			fmt.Println("Reduce Job: ", job)
 			handleReduceJob(reducef, job)
 		case Idle:
-			fmt.Println("Waiting for Job")
 			time.Sleep(1 * time.Second)
 		default:
 			log.Fatal("Job type is none of the above")
