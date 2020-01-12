@@ -46,10 +46,10 @@ func Worker(mapf func(string, string) []KeyValue,
 		job := GetJobFromServer()
 		switch job.JobType {
 		case MapJob:
-			fmt.Println("Map Job: ", job)
+			fmt.Println("Map Job: ", job.Id)
 			handleMapJob(mapf, job)
 		case ReduceJob:
-			fmt.Println("Reduce Job: ", job)
+			fmt.Println("Reduce Job: ", job.Id)
 			handleReduceJob(reducef, job)
 		case Idle:
 			fmt.Println("Waiting :(")
