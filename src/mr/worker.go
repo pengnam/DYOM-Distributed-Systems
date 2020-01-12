@@ -6,6 +6,7 @@ import (
 	"os"
 	"encoding/gob"
 	"sort"
+	"time"
 )
 import "log"
 import "net/rpc"
@@ -44,13 +45,18 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	for {
 		job := GetJobFromServer()
-		switch job.jobType {
+		switch job.JobType {
 		case MapJob:
+			fmt.Println("Map Job: ", job)
 			handleMapJob(mapf, job)
 		case ReduceJob:
-			fmt.Println("Reduce job")
+			fmt.Println("Reduce Job: ", job)
+			handleReduceJob(reducef, job)
+		case Idle:
+			fmt.Println("Waiting for Job")
+			time.Sleep(1 * time.Second)
 		default:
-			log.Fatalf("Neither map or reduce")
+			log.Fatal("Job type is none of the above")
 		}
 	}
 }
@@ -69,21 +75,19 @@ func openFile(filename string) string {
 }
 
 func handleMapJob (mapf func (string, string) []KeyValue, job Job) {
-	fmt.Println("Map job")
+	kva := mapf(job.Filename, openFile(job.Filename))
 
-	kva := mapf(job.filename, openFile(job.filename))
-
-	result := partition(kva)
+	result := partition(kva, job.NumberReduces)
 	for i, val := range result {
-		saveKva(val, "test-"+string(i) + "-" + string(job.id))
+		saveKva(val, fmt.Sprintf("test-%v-%v",i,job.Id))
 	}
 }
 
-func partition(kva []KeyValue) [][]KeyValue{
+func partition(kva []KeyValue, numReduces int) [][]KeyValue{
 	var result [][]KeyValue
-	result = make([][]KeyValue, 10)
+	result = make([][]KeyValue, numReduces)
 	for _, kv := range kva {
-		hash := ihash(kv.Key)
+		hash := ihash(kv.Key) % numReduces
 		result[hash] = append(result[hash], kv)
 	}
 	return result
@@ -113,11 +117,11 @@ func openKva(filename string) []KeyValue{
 }
 
 func handleReduceJob(reducef func(string, []string) string, job Job) {
-	oname := "mr-out-" + string(job.id)
+	oname := fmt.Sprintf("mr-out-%v", job.Id)
 	ofile, _ := os.Create(oname)
 	intermediate := []KeyValue{}
-	for i := 0; i < 10; i++ {
-		intermediate = append(intermediate, openKva("test-" + string(job.id) + "-" + string(i))...)
+	for i := 0; i < job.NumberMaps; i++ {
+		intermediate = append(intermediate, openKva(fmt.Sprintf("test-%v-%v",job.Id, i))...)
 	}
 	sort.Sort(ByKey(intermediate))
 	i := 0
@@ -148,9 +152,9 @@ func GetJobFromServer() Job {
 	reply := GetJobResponse{}
 
 	// send the RPC request, wait for the reply.
-	call("Master.GetJob", &args, &reply)
+	call("Master.Poll", &args, &reply)
 
-	return reply.job
+	return reply.Job
 }
 
 func DeclareFinish() {
