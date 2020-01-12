@@ -42,7 +42,6 @@ func ihash(key string) int {
 
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
-
 	for {
 		job := GetJobFromServer()
 		switch job.JobType {
@@ -84,6 +83,7 @@ func handleMapJob (mapf func (string, string) []KeyValue, job Job) {
 	for i, val := range result {
 		saveKva(val, fmt.Sprintf("test-%v-%v",i,job.Id))
 	}
+	//DeclareFinish(job)
 }
 
 func partition(kva []KeyValue, numReduces int) [][]KeyValue{
@@ -144,23 +144,23 @@ func handleReduceJob(reducef func(string, []string) string, job Job) {
 
 		i = j
 	}
+	//DeclareFinish(job)
 }
 
 func GetJobFromServer() Job {
-	// declare an argument structure.
 	args := GetJobRequest{}
-
-	// declare a reply structure.
 	reply := GetJobResponse{}
-
-	// send the RPC request, wait for the reply.
 	call("Master.GetJob", &args, &reply)
-
 	return reply.Job
 }
 
-func DeclareFinish() {
+func DeclareFinish(job Job) {
+	args := MarkJobCompletedRequest{
+		job: job,
+	}
+	reply := MarkJobCompletedResponse{}
 
+	call("Master.MarkJobCompleted", &args, &reply)
 }
 
 //
