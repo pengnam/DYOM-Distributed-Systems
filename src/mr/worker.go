@@ -83,7 +83,7 @@ func handleMapJob (mapf func (string, string) []KeyValue, job Job) {
 	for i, val := range result {
 		saveKva(val, fmt.Sprintf("test-%v-%v",i,job.Id))
 	}
-	//DeclareFinish(job)
+	DeclareFinish(job)
 }
 
 func partition(kva []KeyValue, numReduces int) [][]KeyValue{
@@ -144,7 +144,7 @@ func handleReduceJob(reducef func(string, []string) string, job Job) {
 
 		i = j
 	}
-	//DeclareFinish(job)
+	DeclareFinish(job)
 }
 
 func GetJobFromServer() Job {
