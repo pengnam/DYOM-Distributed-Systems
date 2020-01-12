@@ -149,8 +149,10 @@ func (m *Master) Done() bool {
 	m.Lock()
 	status := m.phase == ReduceJob && m.hasNoTasks()
 	m.Unlock()
-	time.Sleep(3 * time.Second)
-	os.Exit(0)
+	if status {
+		time.Sleep(3 * time.Second)
+		os.Exit(0)
+	}
 	return status
 }
 
