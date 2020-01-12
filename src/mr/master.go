@@ -28,6 +28,8 @@ func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error 
 	m.CheckState()
 	if m.hasNoUndoneTasks(){
 		// There should not be undone
+		fmt.Println(m.ongoingTasks)
+		fmt.Println(m.taskQueue)
 		response.Job = Job{
 			JobType: m.phase,
 		}
@@ -37,6 +39,7 @@ func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error 
 	e := m.taskQueue.Front()
 	m.taskQueue.Remove(e)
 	taskId := e.Value.(int)
+	m.ongoingTasks[taskId] = m.createTimeout(taskId)
 
 	response.Job = Job{
 		Id:            taskId,
@@ -51,15 +54,17 @@ func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error 
 	return nil
 }
 
-func (m *Master) createTimeout(jobId int) {
+func (m *Master) createTimeout(jobId int) chan int{
 	c := make(chan int)
 	t := time.After(5 * time.Second)
 	go func() {
 		select {
 			case <- t:
 				m.Lock()
+				fmt.Println("TIMEOUT!!!!!!!")
 				delete(m.ongoingTasks, jobId)
 				m.taskQueue.PushBack(jobId)
+
 				m.Unlock()
 			case <- c:
 				m.Lock()
@@ -67,6 +72,7 @@ func (m *Master) createTimeout(jobId int) {
 				m.Unlock()
 		}
 	}()
+	return c
 }
 
 func (m *Master) MarkJobCompleted (request *MarkJobCompletedRequest, response *MarkJobCompletedResponse) {
@@ -79,7 +85,6 @@ func (m *Master) MarkJobCompleted (request *MarkJobCompletedRequest, response *M
 
 // Not thread safe
 func (m *Master) CheckState() {
-	fmt.Println(m.taskQueue)
 	switch (m.phase) {
 	case MapJob:
 		if m.hasNoTasks() {
