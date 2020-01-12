@@ -23,7 +23,7 @@ type Master struct {
 }
 // TODO: Add sync primitives
 // TODO: Add timeout
-func (m *Master) Poll(request *GetJobRequest, response *GetJobResponse) error {
+func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error {
 	fmt.Println("A")
 	m.CheckState()
 	if m.hasNoUndoneTasks(){

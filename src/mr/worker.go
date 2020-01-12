@@ -144,7 +144,6 @@ func handleReduceJob(reducef func(string, []string) string, job Job) {
 }
 
 func GetJobFromServer() Job {
-
 	// declare an argument structure.
 	args := GetJobRequest{}
 
@@ -152,7 +151,7 @@ func GetJobFromServer() Job {
 	reply := GetJobResponse{}
 
 	// send the RPC request, wait for the reply.
-	call("Master.Poll", &args, &reply)
+	call("Master.GetJob", &args, &reply)
 
 	return reply.Job
 }
