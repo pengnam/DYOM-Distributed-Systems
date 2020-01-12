@@ -28,7 +28,7 @@ const (
 )
 
 type MarkJobCompletedRequest struct {
-	job Job
+	Job Job
 }
 
 type MarkJobCompletedResponse struct {}

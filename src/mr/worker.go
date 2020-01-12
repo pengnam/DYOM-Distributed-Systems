@@ -156,7 +156,7 @@ func GetJobFromServer() Job {
 
 func DeclareFinish(job Job) {
 	args := MarkJobCompletedRequest{
-		job: job,
+		Job: job,
 	}
 	reply := MarkJobCompletedResponse{}
 

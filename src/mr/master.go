@@ -22,7 +22,6 @@ type Master struct {
 	numMaps int
 	sync.Mutex
 }
-// TODO: Add timeout
 func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error {
 	m.Lock()
 	m.CheckState()
@@ -30,7 +29,9 @@ func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error 
 		// There should not be undone
 		fmt.Println(m.ongoingTasks)
 		fmt.Println(m.taskQueue)
+		//BUG:
 		response.Job = Job{
+
 			JobType: m.phase,
 		}
 		m.Unlock()
@@ -84,8 +85,8 @@ func (m *Master) createTimeout(jobId int) chan int{
 
 func (m *Master) MarkJobCompleted (request *MarkJobCompletedRequest, response *MarkJobCompletedResponse) {
 	m.Lock()
-	if _, ok := m.ongoingTasks[request.job.Id]; ok {
-		m.ongoingTasks[request.job.Id] <- 1
+	if _, ok := m.ongoingTasks[request.Job.Id]; ok {
+		m.ongoingTasks[request.Job.Id] <- 1
 	}
 	m.Unlock()
 }
