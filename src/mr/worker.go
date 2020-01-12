@@ -57,6 +57,7 @@ func Worker(mapf func(string, string) []KeyValue,
 		case Done:
 			fmt.Println("Done")
 			return
+			fmt.Println("I should never see this")
 		default:
 			log.Fatal("Job type is none of the above")
 		}

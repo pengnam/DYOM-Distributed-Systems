@@ -74,7 +74,6 @@ func (m *Master) createTimeout(jobId int) chan int{
 
 				m.Unlock()
 			case <- c:
-				fmt.Println("DELETING")
 				m.Lock()
 				fmt.Println("HERE")
 				fmt.Println(m.ongoingTasks)
