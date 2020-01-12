@@ -75,11 +75,7 @@ func (m *Master) createTimeout(jobId int) chan int{
 				m.Unlock()
 			case <- c:
 				m.Lock()
-				fmt.Println("HERE")
-				fmt.Println(m.ongoingTasks)
 				delete(m.ongoingTasks, jobId)
-				fmt.Println(m.ongoingTasks)
-				fmt.Println("END HERE")
 				m.Unlock()
 		}
 	}()
@@ -147,12 +143,9 @@ func (m *Master) server() {
 //
 func (m *Master) Done() bool {
 	m.Lock()
-	status := m.phase == ReduceJob && m.hasNoTasks()
+	m.CheckState()
+	status := m.phase == Done
 	m.Unlock()
-	if status {
-		time.Sleep(3 * time.Second)
-		os.Exit(0)
-	}
 	return status
 }
 
