@@ -62,6 +62,8 @@ func (m *Master) createTimeout(jobId int) chan int{
 			case <- t:
 				m.Lock()
 				fmt.Println("TIMEOUT!!!!!!!")
+				fmt.Println(m.ongoingTasks)
+				fmt.Println(m.taskQueue)
 				delete(m.ongoingTasks, jobId)
 				m.taskQueue.PushBack(jobId)
 
