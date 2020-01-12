@@ -2,7 +2,6 @@ package mr
 
 import (
 	"container/list"
-	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -27,8 +26,6 @@ func (m *Master) GetJob(request *GetJobRequest, response *GetJobResponse) error 
 	m.CheckState()
 	if m.hasNoUndoneTasks(){
 		// There should not be undone
-		fmt.Println(m.ongoingTasks)
-		fmt.Println(m.taskQueue)
 		if m.phase == Done {
 			response.Job = Job{
 				JobType: Done,
@@ -66,12 +63,8 @@ func (m *Master) createTimeout(jobId int) chan int{
 		select {
 			case <- t:
 				m.Lock()
-				fmt.Println("TIMEOUT!!!!!!!")
-				fmt.Println(m.ongoingTasks)
-				fmt.Println(m.taskQueue)
 				delete(m.ongoingTasks, jobId)
 				m.taskQueue.PushBack(jobId)
-
 				m.Unlock()
 			case <- c:
 				m.Lock()

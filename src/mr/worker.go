@@ -46,18 +46,13 @@ func Worker(mapf func(string, string) []KeyValue,
 		job := GetJobFromServer()
 		switch job.JobType {
 		case MapJob:
-			fmt.Println("Map Job: ", job.Id)
 			handleMapJob(mapf, job)
 		case ReduceJob:
-			fmt.Println("Reduce Job: ", job.Id)
 			handleReduceJob(reducef, job)
 		case Idle:
-			fmt.Println("Waiting :(")
 			time.Sleep(1 * time.Second)
 		case Done:
-			fmt.Println("Done")
 			return
-			fmt.Println("I should never see this")
 		default:
 			log.Fatal("Job type is none of the above")
 		}
