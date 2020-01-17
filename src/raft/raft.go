@@ -62,7 +62,7 @@ type Raft struct {
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-
+	state NodeState
 }
 
 // return currentTerm and whether this server
@@ -220,6 +220,19 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
+func (rf *Raft) gatherVotes() <- chan bool{
+	fanIn := make(chan bool)
+	for i := 0; i <len(rf.peers); i += 1 {
+		args := RequestVoteArgs{}
+		reply := RequestVoteReply{}
+		go func() {
+			fanIn <- rf.sendRequestVote(i, &args, &reply)
+
+		}()
+	}
+	return fanIn
+}
+
 //
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
@@ -239,6 +252,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
+	var state NodeState = Candidate{}
+	for {
+		state = state.Process(rf)
+	}
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
@@ -247,69 +264,53 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	return rf
 }
 
+type NodeState interface {
+	Process(raft *Raft) NodeState
+}
 
+type Candidate struct {}
 
-func (rf *Raft) newFollower(input <-chan int) {
-	timeout := time.After(rf.getRandomElectionTimeout())
+type Leader struct {}
+
+type Follower struct {}
+
+func (follower Follower) Process(raft *Raft) NodeState {
+	var input <-chan int
+	timeout := time.After(getRandomElectionTimeout())
 	select {
-		case <- timeout:
-			rf.newCandidate()
-		case <-input:
-			rf.newFollower(input)
+	case <- timeout:
+		return Candidate{}
+	case <-input:
+		return Follower{}
 	}
 
 }
-
-func (rf *Raft) getRandomElectionTimeout() time.Duration {
+func getRandomElectionTimeout() time.Duration {
 	dur := time.Duration(rand.Intn(150) + 150)
 	return dur * time.Millisecond
 }
 
-func (rf *Raft) newCandidate() {
+func (candidate Candidate) Process(raft *Raft) NodeState {
+	timeout := time.After(500 * time.Millisecond)
+	count := 0
+	receives := raft.gatherVotes()
 	for {
-		timeout := time.After(500 * time.Millisecond)
-		count := 0
-		// TODO: Ask for votes
-		receives := rf.gatherVotes()
-		for {
-			select {
-			case vote := <- receives:
-				if vote {
-					count += 1
-					if count == majority {
-						rf.newLeader()
-					}
+		select {
+		case vote := <- receives:
+			if vote {
+				count += 1
+				if count == majority {
+					return Leader{}
 				}
-			case <-timeout:
-				//THIS RESETS THE CANDIDATE. Are we supposed to candidate --timeout--> candidate?
-				break
 			}
+		case <-timeout:
+			return Candidate{}
 		}
 	}
 }
 
-func (rf *Raft) gatherVotes() <- chan bool{
-	fanIn := make(chan bool)
-	for i := 0; i <len(rf.peers); i += 1 {
-		args := RequestVoteArgs{}
-		reply := RequestVoteReply{}
-		go func() {
-			fanIn <- rf.sendRequestVote(i, &args, &reply)
-		}()
-	}
-	return fanIn
-}
-
-
-func (rf *Raft) newLeader() {
+func (leader Leader) Process(raft *Raft) NodeState{
 	for {
 		<- time.After(500*time.Millisecond)
 	}
-}
-
-type Candidate struct {
-}
-
-type Master struct {
-
 }
