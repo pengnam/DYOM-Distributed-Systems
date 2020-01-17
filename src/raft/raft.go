@@ -17,12 +17,18 @@ package raft
 //   in the same server.
 //
 
-import "sync"
+import (
+	"math/rand"
+	"sync"
+	"time"
+)
 import "sync/atomic"
 import "labrpc"
 
 // import "bytes"
 // import "labgob"
+
+const majority = 0
 
 
 
@@ -239,4 +245,71 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 
 	return rf
+}
+
+
+
+func (rf *Raft) newFollower(input <-chan int) {
+	timeout := time.After(rf.getRandomElectionTimeout())
+	select {
+		case <- timeout:
+			rf.newCandidate()
+		case <-input:
+			rf.newFollower(input)
+	}
+
+}
+
+func (rf *Raft) getRandomElectionTimeout() time.Duration {
+	dur := time.Duration(rand.Intn(150) + 150)
+	return dur * time.Millisecond
+}
+
+func (rf *Raft) newCandidate() {
+	for {
+		timeout := time.After(500 * time.Millisecond)
+		count := 0
+		// TODO: Ask for votes
+		receives := rf.gatherVotes()
+		for {
+			select {
+			case vote := <- receives:
+				if vote {
+					count += 1
+					if count == majority {
+						rf.newLeader()
+					}
+				}
+			case <-timeout:
+				//THIS RESETS THE CANDIDATE. Are we supposed to candidate --timeout--> candidate?
+				break
+			}
+		}
+	}
+}
+
+func (rf *Raft) gatherVotes() <- chan bool{
+	fanIn := make(chan bool)
+	for i := 0; i <len(rf.peers); i += 1 {
+		args := RequestVoteArgs{}
+		reply := RequestVoteReply{}
+		go func() {
+			fanIn <- rf.sendRequestVote(i, &args, &reply)
+		}()
+	}
+	return fanIn
+}
+
+
+func (rf *Raft) newLeader() {
+	for {
+		<- time.After(500*time.Millisecond)
+	}
+}
+
+type Candidate struct {
+}
+
+type Master struct {
+
 }
