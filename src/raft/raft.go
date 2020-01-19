@@ -62,7 +62,10 @@ type Raft struct {
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-	state NodeState
+	state       NodeState
+	currentTerm int
+	votedFor    int
+	NONE int
 }
 
 // return currentTerm and whether this server
@@ -122,7 +125,10 @@ func (rf *Raft) readPersist(data []byte) {
 // field names must start with capital letters!
 //
 type RequestVoteArgs struct {
-	// Your data here (2A, 2B).
+	Term int
+	CandidateId int
+	//LastLogIndex int
+	//LastLogTerm int
 }
 
 //
@@ -130,14 +136,29 @@ type RequestVoteArgs struct {
 // field names must start with capital letters!
 //
 type RequestVoteReply struct {
-	// Your data here (2A).
+	Term int
+	VoteGranted bool
 }
 
 //
 // example RequestVote RPC handler.
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	// Your code here (2A, 2B).
+	if args.Term > rf.currentTerm {
+		rf.state.Demotion()
+	}
+	reply.Term = rf.currentTerm
+	if args.Term < rf.currentTerm {
+		reply.VoteGranted = false
+		return
+	}
+
+	if rf.votedFor == rf.NONE || rf.votedFor == args.CandidateId{
+		reply.VoteGranted = true
+		rf.votedFor = args.CandidateId
+	} else {
+		reply.VoteGranted = false
+	}
 }
 
 //
@@ -220,14 +241,17 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
-func (rf *Raft) gatherVotes() <- chan bool{
-	fanIn := make(chan bool)
+func (rf *Raft) gatherVotes() <- chan RequestVoteReply{
+	fanIn := make(chan RequestVoteReply)
 	for i := 0; i <len(rf.peers); i += 1 {
-		args := RequestVoteArgs{}
+		args := RequestVoteArgs{
+			rf.currentTerm,
+			rf.me,
+		}
 		reply := RequestVoteReply{}
 		go func() {
-			fanIn <- rf.sendRequestVote(i, &args, &reply)
-
+			rf.sendRequestVote(i, &args, &reply)
+			fanIn <- reply
 		}()
 	}
 	return fanIn
@@ -250,11 +274,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
+	rf.NONE = len(peers)
 
 	// Your initialization code here (2A, 2B, 2C).
-	var state NodeState = Candidate{}
+	// FSM YO!!
+	rf.state = Follower{}
 	for {
-		state = state.Process(rf)
+		rf.state = rf.state.ProcessState(rf)
+
+		if rf.state.
 	}
 
 	// initialize from state persisted before a crash
@@ -264,52 +292,129 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	return rf
 }
 
-type NodeState interface {
-	Process(raft *Raft) NodeState
+func goToNextState(ns NodeState, rf *Raft) NodeState{
+	return ns.ProcessState(rf)
 }
 
-type Candidate struct {}
 
-type Leader struct {}
+type NodeState interface {
+	ProcessState(raft *Raft) NodeState
+	Demotion()
+	ResetDemotionState()
+}
+type DemotionHelper struct {
+	 demoteChannel chan int
+	 isInProcessOfDemoting bool
+	 doneDemotion chan int
+}
 
-type Follower struct {}
+func newDemotionHelper() DemotionHelper{
+	return DemotionHelper{
+		demoteChannel:         make(chan int),
+		isInProcessOfDemoting: false,
+		doneDemotion:make(chan int),
+	}
+}
 
-func (follower Follower) Process(raft *Raft) NodeState {
-	var input <-chan int
+func (dh *DemotionHelper) Demotion(){
+	// Sends to channel for Node to process
+	dh.demoteChannel <- 1
+	// Waits until demotion is complete before continuing
+	dh.isInProcessOfDemoting = true
+	<- dh.doneDemotion
+}
+
+func (dh *DemotionHelper) ResetDemotionState() {
+	if dh.isInProcessOfDemoting {
+		dh.isInProcessOfDemoting = false
+	}
+}
+
+func (rf *Raft) shouldBeDemoted(newTerm int) bool{
+	return newTerm > rf.currentTerm
+}
+
+/// STATES
+
+type Candidate struct {
+	receivedHeartbeat chan int
+	*DemotionHelper
+}
+func newCandidate() Candidate {
+	return Candidate{
+		receivedHeartbeat: make(chan int),
+	}
+}
+
+type Leader struct {
+	*DemotionHelper
+}
+
+type Follower struct {
+	// Received either appendMessage or grantedVote
+	gotValidMessage bool
+	*DemotionHelper
+}
+
+func newFollower() Follower {
+	return Follower{
+		gotValidMessage: false,
+	}
+}
+
+func newFollower() Follower {
+
+}
+
+func (follower Follower) ProcessState(raft *Raft) NodeState {
 	timeout := time.After(getRandomElectionTimeout())
 	select {
-	case <- timeout:
-		return Candidate{}
-	case <-input:
-		return Follower{}
+		case <- timeout:
+			if follower.gotValidMessage {
+				return newFollower()
+			} else {
+				return newCandidate()
+			}
+		case <- follower.demoteChannel:
+			return newFollower()
 	}
-
 }
+
 func getRandomElectionTimeout() time.Duration {
 	dur := time.Duration(rand.Intn(150) + 150)
 	return dur * time.Millisecond
 }
 
-func (candidate Candidate) Process(raft *Raft) NodeState {
-	timeout := time.After(500 * time.Millisecond)
-	count := 0
-	receives := raft.gatherVotes()
+func (candidate Candidate) ProcessState(raft *Raft) NodeState {
+	raft.currentTerm += 1
+	raft.votedFor = raft.me
+
 	for {
+		timeout := time.After(getRandomElectionTimeout())
+		count := 0
+		receives := raft.gatherVotes()
 		select {
-		case vote := <- receives:
-			if vote {
-				count += 1
-				if count == majority {
-					return Leader{}
+			case vote := <-receives:
+				if vote.Term > raft.currentTerm {
+					return newFollower()
 				}
-			}
-		case <-timeout:
-			return Candidate{}
+				if vote.VoteGranted {
+					count += 1
+					if count == majority {
+						return Leader{}
+					}
+				}
+			case <-timeout:
+				// Restarts election
+				break
+			case <-candidate.receivedHeartbeat:
+				return newFollower()
 		}
 	}
+	return nil
 }
 
-func (leader Leader) Process(raft *Raft) NodeState{
+func (leader Leader) ProcessState(raft *Raft) NodeState{
 	for {
 		<- time.After(500*time.Millisecond)
 	}
