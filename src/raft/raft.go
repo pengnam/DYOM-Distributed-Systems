@@ -322,6 +322,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.NONE = len(peers)
 	rf.votedFor = rf.NONE
 	dh := newDemotionHelper()
+	rf.appendEntriesSignal = make(chan int)
 	rf.DemotionHelper = &dh
 
 	// Your initialization code here (2A, 2B, 2C).
@@ -406,21 +407,23 @@ func getRandomElectionTimeout() time.Duration {
 
 func (follower *Follower) ProcessState(raft *Raft) NodeState {
 	timeout := time.After(getRandomElectionTimeout())
-	select {
-		case <- raft.appendEntriesSignal:
-			fmt.Println(raft.me, " has received hearbeat")
-			follower.gotValidMessage = true
-		case <- raft.demoteChannel:
-			fmt.Println(raft.me, " is demoted because it received an rpc request of a higher term")
-			return newFollower()
-		case <- timeout:
-			if follower.gotValidMessage {
-				fmt.Println(raft.me, " is demoted because it received a hearbeat")
+	for {
+		select {
+			case <- raft.appendEntriesSignal:
+				fmt.Println(raft.me, " has received hearbeat")
+				follower.gotValidMessage = true
+			case <- raft.demoteChannel:
+				fmt.Println(raft.me, " is demoted because it received an rpc request of a higher term")
 				return newFollower()
-			} else {
-				fmt.Println(raft.me, "did not get the right message")
-				return newCandidate()
-			}
+			case <- timeout:
+				if follower.gotValidMessage {
+					fmt.Println(raft.me, " is demoted because it received a hearbeat")
+					return newFollower()
+				} else {
+					fmt.Println(raft.me, "did not get the right message")
+					return newCandidate()
+				}
+		}
 	}
 	return nil
 }
