@@ -20,6 +20,7 @@ package raft
 import (
 	"fmt"
 	"math/rand"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -29,7 +30,6 @@ import "labrpc"
 // import "bytes"
 // import "labgob"
 
-const majority = 0
 
 
 
@@ -75,10 +75,9 @@ type Raft struct {
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 
-	var term int
-	var isleader bool
 	// Your code here (2A).
-	return term, isleader
+	// TODO: Don't think this is the right equality
+	return rf.currentTerm, rf.me == rf.votedFor
 }
 
 //
@@ -282,17 +281,20 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.NONE = len(peers)
 	dh := newDemotionHelper()
 	rf.DemotionHelper = &dh
-	fmt.Println("HI")
 
 	// Your initialization code here (2A, 2B, 2C).
 	// FSM YO!!
-	rf.state = Follower{}
-	for {
-		fmt.Println("================NEW STATE=====================")
-		fmt.Println(rf.state)
-		rf.state = rf.state.ProcessState(rf)
-		rf.ResetDemotionState()
-	}
+	go func() {
+		rf.state = Follower{}
+		for {
+			fmt.Println("================NEW STATE=====================")
+			fmt.Println(rf.me)
+			fmt.Println(reflect.TypeOf(rf.state))
+			fmt.Println("==============================================")
+			rf.state = rf.state.ProcessState(rf)
+			rf.ResetDemotionState()
+		}
+	}()
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
@@ -300,8 +302,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	return rf
 }
-
-
 
 type NodeState interface {
 	ProcessState(raft *Raft) NodeState
@@ -374,7 +374,7 @@ func (follower Follower) ProcessState(raft *Raft) NodeState {
 }
 
 func getRandomElectionTimeout() time.Duration {
-	dur := time.Duration(rand.Intn(150) + 150)
+	dur := time.Duration(rand.Intn(150) + 300)
 	return dur * time.Millisecond
 }
 
@@ -384,7 +384,7 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 
 	for {
 		timeout := time.After(getRandomElectionTimeout())
-		count := 0
+		count := 1
 		receives := raft.gatherVotes()
 		select {
 			case vote := <-receives:
@@ -393,7 +393,7 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 				}
 				if vote.VoteGranted {
 					count += 1
-					if count == majority {
+					if count >= len(raft.peers)/2 {
 						return Leader{}
 					}
 				}
