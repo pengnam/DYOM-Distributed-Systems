@@ -78,6 +78,10 @@ func (rf *Raft) GetState() (int, bool) {
 	// Your code here (2A).
 	// TODO: Don't think this is the right equality
 	_, isLeader := rf.state.(Leader)
+	if isLeader {
+		fmt.Println("--------")
+		fmt.Println(rf.me, " is leader")
+	}
 	return rf.currentTerm, isLeader
 }
 
@@ -148,6 +152,7 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	if args.Term > rf.currentTerm {
+		rf.currentTerm = args.Term
 		rf.Demotion()
 	}
 	reply.Term = rf.currentTerm
@@ -157,6 +162,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	if rf.votedFor == rf.NONE || rf.votedFor == args.CandidateId{
+		fmt.Println(rf.me, " is voting for ", args.CandidateId)
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateId
 	} else {
@@ -247,7 +253,9 @@ func (rf *Raft) killed() bool {
 func (rf *Raft) gatherVotes() <- chan RequestVoteReply{
 	fanIn := make(chan RequestVoteReply)
 	for i := 0; i <len(rf.peers); i += 1 {
-		go sendVoteHelper(i, rf, fanIn)
+		if i != rf.me {
+			go sendVoteHelper(i, rf, fanIn)
+		}
 	}
 	return fanIn
 }
@@ -280,6 +288,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 	rf.NONE = len(peers)
+	rf.votedFor = rf.NONE
 	dh := newDemotionHelper()
 	rf.DemotionHelper = &dh
 
@@ -395,6 +404,7 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 				if vote.VoteGranted {
 					count += 1
 					if count >= len(raft.peers)/2 {
+						fmt.Println(raft.me, " has ", count, " votes")
 						return Leader{}
 					}
 				}
