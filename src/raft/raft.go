@@ -197,6 +197,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = false
 		return
 	}
+	fmt.Println(rf.me, " working with append entry")
+	rf.appendEntriesSignal <- 1
+	fmt.Println(rf.me, " received signal to append entry")
 }
 
 //
@@ -368,6 +371,7 @@ func (dh *DemotionHelper) Demotion(){
 func (dh *DemotionHelper) ResetDemotionState() {
 	if dh.isInProcessOfDemoting {
 		dh.isInProcessOfDemoting = false
+		dh.doneDemotion <- 1
 	}
 }
 
@@ -403,16 +407,20 @@ func getRandomElectionTimeout() time.Duration {
 func (follower *Follower) ProcessState(raft *Raft) NodeState {
 	timeout := time.After(getRandomElectionTimeout())
 	select {
-		case <- timeout:
-			if follower.gotValidMessage {
-				return newFollower()
-			} else {
-				return newCandidate()
-			}
 		case <- raft.appendEntriesSignal:
+			fmt.Println(raft.me, " has received hearbeat")
 			follower.gotValidMessage = true
 		case <- raft.demoteChannel:
+			fmt.Println(raft.me, " is demoted because it received an rpc request of a higher term")
 			return newFollower()
+		case <- timeout:
+			if follower.gotValidMessage {
+				fmt.Println(raft.me, " is demoted because it received a hearbeat")
+				return newFollower()
+			} else {
+				fmt.Println(raft.me, "did not get the right message")
+				return newCandidate()
+			}
 	}
 	return nil
 }
@@ -439,6 +447,7 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 					}
 				}
 			case <-timeout:
+				fmt.Println(raft.me, " is Tan Cheng Bok and is reelecting")
 				// Restarts election
 				timeout = time.After(getRandomElectionTimeout())
 				receives = raft.gatherVotes()
@@ -454,6 +463,7 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 
 func (leader Leader) ProcessState(raft *Raft) NodeState{
 	for {
+		fmt.Println(raft.me, "Sending heartbeat")
 		raft.sendHeartBeat()
 		time.Sleep(110*time.Millisecond)
 	}
@@ -476,6 +486,7 @@ func sendAppendEntriesHelper(i int, rf *Raft) {
 	rf.sendAppendEntries(i, &args, &reply)
 
 	if reply.Term > rf.currentTerm {
+		rf.currentTerm = reply.Term
 		rf.Demotion()
 	}
 }
