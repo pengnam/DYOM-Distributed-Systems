@@ -77,7 +77,8 @@ func (rf *Raft) GetState() (int, bool) {
 
 	// Your code here (2A).
 	// TODO: Don't think this is the right equality
-	return rf.currentTerm, rf.me == rf.votedFor
+	_, isLeader := rf.state.(Leader)
+	return rf.currentTerm, isLeader
 }
 
 //
@@ -381,11 +382,11 @@ func getRandomElectionTimeout() time.Duration {
 func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 	raft.currentTerm += 1
 	raft.votedFor = raft.me
+	timeout := time.After(getRandomElectionTimeout())
+	count := 1
+	receives := raft.gatherVotes()
 
 	for {
-		timeout := time.After(getRandomElectionTimeout())
-		count := 1
-		receives := raft.gatherVotes()
 		select {
 			case vote := <-receives:
 				if vote.Term > raft.currentTerm {
@@ -399,7 +400,9 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 				}
 			case <-timeout:
 				// Restarts election
-				break
+				timeout = time.After(getRandomElectionTimeout())
+				receives = raft.gatherVotes()
+				count = 1
 			case <- raft.demoteChannel:
 				return newFollower()
 			case <-candidate.receivedHeartbeat:
