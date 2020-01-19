@@ -68,6 +68,8 @@ type Raft struct {
 	votedFor    int
 	NONE int
 
+	appendEntriesSignal chan int
+
 	*DemotionHelper
 }
 
@@ -128,8 +130,7 @@ func (rf *Raft) readPersist(data []byte) {
 
 
 //
-// example RequestVote RPC arguments structure.
-// field names must start with capital letters!
+// RequestVote RPC arguments structure.
 //
 type RequestVoteArgs struct {
 	Term int
@@ -139,8 +140,7 @@ type RequestVoteArgs struct {
 }
 
 //
-// example RequestVote RPC reply structure.
-// field names must start with capital letters!
+// RequestVote RPC reply structure.
 //
 type RequestVoteReply struct {
 	Term int
@@ -148,7 +148,7 @@ type RequestVoteReply struct {
 }
 
 //
-// example RequestVote RPC handler.
+// RequestVote RPC handler.
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	if args.Term > rf.currentTerm {
@@ -167,6 +167,35 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.votedFor = args.CandidateId
 	} else {
 		reply.VoteGranted = false
+	}
+}
+
+//
+// AppendEntries RPC arguments structure.
+//
+type AppendEntriesArgs struct {
+	Term int
+	LeaderId int
+}
+
+//
+// AppendEntries RPC reply structure.
+//
+type AppendEntriesReply struct {
+	Term int
+	Success bool
+}
+//
+// AppendEntries RPC Handler
+//
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	if args.Term > rf.currentTerm {
+		rf.currentTerm = args.Term
+		rf.Demotion()
+	}
+	if args.Term < rf.currentTerm {
+		reply.Success = false
+		return
 	}
 }
 
@@ -295,7 +324,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Your initialization code here (2A, 2B, 2C).
 	// FSM YO!!
 	go func() {
-		rf.state = Follower{}
+		rf.state = newFollower()
 		for {
 			fmt.Println("================NEW STATE=====================")
 			fmt.Println(rf.me)
@@ -308,8 +337,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-
-
 	return rf
 }
 
@@ -363,13 +390,17 @@ type Follower struct {
 	gotValidMessage bool
 }
 
-func newFollower() Follower {
-	return Follower{
+func newFollower() *Follower {
+	return &Follower{
 		gotValidMessage: false,
 	}
 }
+func getRandomElectionTimeout() time.Duration {
+	dur := time.Duration(rand.Intn(150) + 300)
+	return dur * time.Millisecond
+}
 
-func (follower Follower) ProcessState(raft *Raft) NodeState {
+func (follower *Follower) ProcessState(raft *Raft) NodeState {
 	timeout := time.After(getRandomElectionTimeout())
 	select {
 		case <- timeout:
@@ -378,15 +409,14 @@ func (follower Follower) ProcessState(raft *Raft) NodeState {
 			} else {
 				return newCandidate()
 			}
+		case <- raft.appendEntriesSignal:
+			follower.gotValidMessage = true
 		case <- raft.demoteChannel:
 			return newFollower()
 	}
+	return nil
 }
 
-func getRandomElectionTimeout() time.Duration {
-	dur := time.Duration(rand.Intn(150) + 300)
-	return dur * time.Millisecond
-}
 
 func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 	raft.currentTerm += 1
@@ -415,7 +445,7 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 				count = 1
 			case <- raft.demoteChannel:
 				return newFollower()
-			case <-candidate.receivedHeartbeat:
+			case <- raft.appendEntriesSignal:
 				return newFollower()
 		}
 	}
@@ -424,6 +454,33 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 
 func (leader Leader) ProcessState(raft *Raft) NodeState{
 	for {
-		<- time.After(500*time.Millisecond)
+		raft.sendHeartBeat()
+		time.Sleep(110*time.Millisecond)
 	}
+}
+
+func (rf *Raft) sendHeartBeat() {
+	for i := 0; i <len(rf.peers); i += 1 {
+		if i != rf.me {
+			go sendAppendEntriesHelper(i, rf)
+		}
+	}
+}
+
+func sendAppendEntriesHelper(i int, rf *Raft) {
+	args := AppendEntriesArgs{
+		rf.currentTerm,
+		rf.me,
+	}
+	reply := AppendEntriesReply{}
+	rf.sendAppendEntries(i, &args, &reply)
+
+	if reply.Term > rf.currentTerm {
+		rf.Demotion()
+	}
+}
+
+func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	return ok
 }
