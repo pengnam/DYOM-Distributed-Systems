@@ -247,17 +247,19 @@ func (rf *Raft) killed() bool {
 func (rf *Raft) gatherVotes() <- chan RequestVoteReply{
 	fanIn := make(chan RequestVoteReply)
 	for i := 0; i <len(rf.peers); i += 1 {
-		args := RequestVoteArgs{
-			rf.currentTerm,
-			rf.me,
-		}
-		reply := RequestVoteReply{}
-		go func() {
-			rf.sendRequestVote(i, &args, &reply)
-			fanIn <- reply
-		}()
+		go sendVoteHelper(i, rf, fanIn)
 	}
 	return fanIn
+}
+
+func sendVoteHelper(i int, rf *Raft, fanIn chan RequestVoteReply) {
+	args := RequestVoteArgs{
+		rf.currentTerm,
+		rf.me,
+	}
+	reply := RequestVoteReply{}
+	rf.sendRequestVote(i, &args, &reply)
+	fanIn <- reply
 }
 
 //
@@ -278,15 +280,16 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 	rf.NONE = len(peers)
-	rf.demoteChannel = make(chan int)
-	rf.isInProcessOfDemoting = false
-	rf.doneDemotion = make(chan int)
+	dh := newDemotionHelper()
+	rf.DemotionHelper = &dh
 	fmt.Println("HI")
 
 	// Your initialization code here (2A, 2B, 2C).
 	// FSM YO!!
 	rf.state = Follower{}
 	for {
+		fmt.Println("================NEW STATE=====================")
+		fmt.Println(rf.state)
 		rf.state = rf.state.ProcessState(rf)
 		rf.ResetDemotionState()
 	}
