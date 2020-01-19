@@ -18,6 +18,7 @@ package raft
 //
 
 import (
+	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -66,6 +67,8 @@ type Raft struct {
 	currentTerm int
 	votedFor    int
 	NONE int
+
+	*DemotionHelper
 }
 
 // return currentTerm and whether this server
@@ -145,7 +148,7 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	if args.Term > rf.currentTerm {
-		rf.state.Demotion()
+		rf.Demotion()
 	}
 	reply.Term = rf.currentTerm
 	if args.Term < rf.currentTerm {
@@ -275,14 +278,17 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 	rf.NONE = len(peers)
+	rf.demoteChannel = make(chan int)
+	rf.isInProcessOfDemoting = false
+	rf.doneDemotion = make(chan int)
+	fmt.Println("HI")
 
 	// Your initialization code here (2A, 2B, 2C).
 	// FSM YO!!
 	rf.state = Follower{}
 	for {
 		rf.state = rf.state.ProcessState(rf)
-
-		if rf.state.
+		rf.ResetDemotionState()
 	}
 
 	// initialize from state persisted before a crash
@@ -292,15 +298,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	return rf
 }
 
-func goToNextState(ns NodeState, rf *Raft) NodeState{
-	return ns.ProcessState(rf)
-}
 
 
 type NodeState interface {
 	ProcessState(raft *Raft) NodeState
-	Demotion()
-	ResetDemotionState()
 }
 type DemotionHelper struct {
 	 demoteChannel chan int
@@ -330,15 +331,10 @@ func (dh *DemotionHelper) ResetDemotionState() {
 	}
 }
 
-func (rf *Raft) shouldBeDemoted(newTerm int) bool{
-	return newTerm > rf.currentTerm
-}
-
 /// STATES
 
 type Candidate struct {
 	receivedHeartbeat chan int
-	*DemotionHelper
 }
 func newCandidate() Candidate {
 	return Candidate{
@@ -347,23 +343,17 @@ func newCandidate() Candidate {
 }
 
 type Leader struct {
-	*DemotionHelper
 }
 
 type Follower struct {
 	// Received either appendMessage or grantedVote
 	gotValidMessage bool
-	*DemotionHelper
 }
 
 func newFollower() Follower {
 	return Follower{
 		gotValidMessage: false,
 	}
-}
-
-func newFollower() Follower {
-
 }
 
 func (follower Follower) ProcessState(raft *Raft) NodeState {
@@ -375,7 +365,7 @@ func (follower Follower) ProcessState(raft *Raft) NodeState {
 			} else {
 				return newCandidate()
 			}
-		case <- follower.demoteChannel:
+		case <- raft.demoteChannel:
 			return newFollower()
 	}
 }
@@ -407,6 +397,8 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 			case <-timeout:
 				// Restarts election
 				break
+			case <- raft.demoteChannel:
+				return newFollower()
 			case <-candidate.receivedHeartbeat:
 				return newFollower()
 		}
