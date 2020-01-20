@@ -197,9 +197,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = false
 		return
 	}
-	fmt.Println(rf.me, " working with append entry")
 	rf.appendEntriesSignal <- 1
-	fmt.Println(rf.me, " received signal to append entry")
 }
 
 //
@@ -335,7 +333,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			fmt.Println(reflect.TypeOf(rf.state))
 			fmt.Println("==============================================")
 			rf.state = rf.state.ProcessState(rf)
-			rf.ResetDemotionState()
+			rf.ResetDemotionState(rf)
 		}
 	}()
 
@@ -369,10 +367,11 @@ func (dh *DemotionHelper) Demotion(){
 	<- dh.doneDemotion
 }
 
-func (dh *DemotionHelper) ResetDemotionState() {
+func (dh *DemotionHelper) ResetDemotionState(raft *Raft) {
 	if dh.isInProcessOfDemoting {
 		dh.isInProcessOfDemoting = false
 		dh.doneDemotion <- 1
+		raft.votedFor = raft.NONE
 	}
 }
 
@@ -410,7 +409,6 @@ func (follower *Follower) ProcessState(raft *Raft) NodeState {
 	for {
 		select {
 			case <- raft.appendEntriesSignal:
-				fmt.Println(raft.me, " has received hearbeat")
 				follower.gotValidMessage = true
 			case <- raft.demoteChannel:
 				fmt.Println(raft.me, " is demoted because it received an rpc request of a higher term")
@@ -450,11 +448,13 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 					}
 				}
 			case <-timeout:
-				fmt.Println(raft.me, " is Tan Cheng Bok and is reelecting")
+
+				fmt.Println(raft.me, " is Tan Cheng Bok and is reelecting. Term: ", raft.currentTerm)
 				// Restarts election
 				timeout = time.After(getRandomElectionTimeout())
 				receives = raft.gatherVotes()
 				count = 1
+				raft.currentTerm += 1
 			case <- raft.demoteChannel:
 				return newFollower()
 			case <- raft.appendEntriesSignal:
@@ -465,10 +465,16 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 }
 
 func (leader Leader) ProcessState(raft *Raft) NodeState{
+	timeout := time.After(getRandomElectionTimeout())
 	for {
-		fmt.Println(raft.me, "Sending heartbeat")
-		raft.sendHeartBeat()
-		time.Sleep(110*time.Millisecond)
+		select {
+			case <- raft.demoteChannel:
+				fmt.Println("Leader ", raft.me, " demoted")
+				return newFollower()
+			case <- timeout:
+				raft.sendHeartBeat()
+				timeout = time.After(getRandomElectionTimeout())
+		}
 	}
 }
 

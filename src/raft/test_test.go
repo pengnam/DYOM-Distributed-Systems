@@ -70,11 +70,23 @@ func TestReElection2A(t *testing.T) {
 
 	// if there's no quorum, no leader should
 	// be elected.
+	//fmt.Println("QUORUM CHECK")
+	//fmt.Println("QUORUM CHECK")
+	//fmt.Println("QUORUM CHECK")
+	//fmt.Println("QUORUM CHECK")
+	//fmt.Println("QUORUM CHECK")
+	//fmt.Println("QUORUM CHECK")
+	//
 	cfg.disconnect(leader2)
 	cfg.disconnect((leader2 + 1) % servers)
 	time.Sleep(2 * RaftElectionTimeout)
 	cfg.checkNoLeader()
 
+	//fmt.Println("QUORUM REGAIN CHECK")
+	//fmt.Println("QUORUM REGAIN CHECK")
+	//fmt.Println("QUORUM REGAIN CHECK")
+	//fmt.Println("QUORUM REGAIN CHECK")
+	//fmt.Println("QUORUM REGAIN CHECK")
 	// if a quorum arises, it should elect a leader.
 	cfg.connect((leader2 + 1) % servers)
 	cfg.checkOneLeader()
