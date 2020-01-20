@@ -165,6 +165,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		fmt.Println(rf.me, " is voting for ", args.CandidateId)
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateId
+
+		// TODO: Verify this
+		if state, ok := rf.state.(*Follower); ok {
+			state.gotValidMessage = true
+		}
 	} else {
 		reply.VoteGranted = false
 	}
