@@ -378,12 +378,9 @@ func (dh *DemotionHelper) ResetDemotionState(raft *Raft) {
 /// STATES
 
 type Candidate struct {
-	receivedHeartbeat chan int
 }
 func newCandidate() Candidate {
-	return Candidate{
-		receivedHeartbeat: make(chan int),
-	}
+	return Candidate{}
 }
 
 type Leader struct {
@@ -451,10 +448,7 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 
 				fmt.Println(raft.me, " is Tan Cheng Bok and is reelecting. Term: ", raft.currentTerm)
 				// Restarts election
-				timeout = time.After(getRandomElectionTimeout())
-				receives = raft.gatherVotes()
-				count = 1
-				raft.currentTerm += 1
+				return newCandidate()
 			case <- raft.demoteChannel:
 				return newFollower()
 			case <- raft.appendEntriesSignal:
