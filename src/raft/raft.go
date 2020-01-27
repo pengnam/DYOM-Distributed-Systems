@@ -67,8 +67,13 @@ type Raft struct {
 	currentTerm int
 	votedFor    int
 	NONE int
+	log	[]int
+
+	commitIndex int
+	lastApplied int
 
 	appendEntriesSignal chan int
+	applyCh chan ApplyMsg
 
 	*DemotionHelper
 }
@@ -135,8 +140,8 @@ func (rf *Raft) readPersist(data []byte) {
 type RequestVoteArgs struct {
 	Term int
 	CandidateId int
-	//LastLogIndex int
-	//LastLogTerm int
+	LastLogIndex int
+	LastLogTerm int
 }
 
 //
@@ -188,6 +193,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 type AppendEntriesArgs struct {
 	Term int
 	LeaderId int
+
+	PrevLogIndex int
+	PrevLogTerm int
+	Entries []int
+	LeaderCommit int
 }
 
 //
@@ -269,12 +279,14 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
+	if _, ok := rf.state.(*Leader); !ok {
+		// TODO: Return -1?
+		return -1, rf.currentTerm, false
+	}
+
 	index := -1
 	term := -1
 	isLeader := true
-
-	// Your code here (2B).
-
 
 	return index, term, isLeader
 }
@@ -341,6 +353,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	dh := newDemotionHelper()
 	rf.appendEntriesSignal = make(chan int)
 	rf.DemotionHelper = &dh
+	rf.applyCh = applyCh
 
 	// Your initialization code here (2A, 2B, 2C).
 	// FSM YO!!
@@ -403,6 +416,15 @@ func newCandidate() Candidate {
 }
 
 type Leader struct {
+	nextIndex []int
+	matchIndex []int
+}
+
+func newLeader(numServers int) *Leader {
+	return &Leader{
+		nextIndex: make([]int, numServers),
+		matchIndex: make([]int, numServers),
+	}
 }
 
 type Follower struct {
@@ -465,11 +487,10 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 					count += 1
 					if count >= len(raft.peers)/2 {
 						fmt.Println(raft.me, " has ", count, " votes")
-						return Leader{}
+						return newLeader(len(raft.peers))
 					}
 				}
 			case <-timeout:
-
 				fmt.Println(raft.me, " is Tan Cheng Bok and is reelecting. Term: ", raft.currentTerm)
 				// Restarts election
 				return newCandidate()
