@@ -84,7 +84,7 @@ func (rf *Raft) GetState() (int, bool) {
 
 	// Your code here (2A).
 	// TODO: Don't think this is the right equality
-	_, isLeader := rf.state.(Leader)
+	_, isLeader := rf.state.(*Leader)
 	if isLeader {
 		fmt.Println("--------")
 		fmt.Println(rf.me, " is leader")
@@ -279,10 +279,10 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	if _, ok := rf.state.(*Leader); !ok {
-		// TODO: Return -1?
-		return -1, rf.currentTerm, false
-	}
+	//if _, ok := rf.state.(*Leader); !ok {
+	//	// TODO: Return -1?
+	//	return -1, rf.currentTerm, false
+	//}
 
 	index := -1
 	term := -1
@@ -325,7 +325,11 @@ func sendVoteHelper(i int, rf *Raft, fanIn chan RequestVoteReply) {
 	args := RequestVoteArgs{
 		rf.currentTerm,
 		rf.me,
+		rf.lastApplied,
+		rf.log[rf.lastApplied],
 	}
+
+
 	reply := RequestVoteReply{}
 	rf.sendRequestVote(i, &args, &reply)
 	fanIn <- reply
@@ -354,6 +358,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.appendEntriesSignal = make(chan int)
 	rf.DemotionHelper = &dh
 	rf.applyCh = applyCh
+	rf.log = make([]int, 1)
 
 	// Your initialization code here (2A, 2B, 2C).
 	// FSM YO!!
@@ -511,24 +516,29 @@ func (leader Leader) ProcessState(raft *Raft) NodeState{
 				fmt.Println("Leader ", raft.me, " demoted")
 				return newFollower()
 			case <- timeout:
-				raft.sendHeartBeat()
+				raft.updateLogEntries(&leader)
 				timeout = time.After(getRandomElectionTimeout())
 		}
 	}
 }
 
-func (rf *Raft) sendHeartBeat() {
+func (rf *Raft) updateLogEntries(leader *Leader) {
 	for i := 0; i <len(rf.peers); i += 1 {
 		if i != rf.me {
-			go sendAppendEntriesHelper(i, rf)
+			go sendAppendEntriesHelper(i, rf, leader)
 		}
 	}
 }
 
-func sendAppendEntriesHelper(i int, rf *Raft) {
+func sendAppendEntriesHelper(i int, rf *Raft, leader *Leader) {
+	firstMiss := leader.nextIndex[i]
 	args := AppendEntriesArgs{
 		rf.currentTerm,
 		rf.me,
+		firstMiss - 1,
+		rf.log[firstMiss],
+		rf.log[firstMiss:],
+		rf.commitIndex,
 	}
 	reply := AppendEntriesReply{}
 	rf.sendAppendEntries(i, &args, &reply)
