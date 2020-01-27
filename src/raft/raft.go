@@ -151,13 +151,19 @@ type RequestVoteReply struct {
 // RequestVote RPC handler.
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
+	rf.mu.Lock()
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
+		rf.mu.Unlock()
 		rf.Demotion()
+	} else {
+		rf.mu.Unlock()
 	}
+	rf.mu.Lock()
 	reply.Term = rf.currentTerm
 	if args.Term < rf.currentTerm {
 		reply.VoteGranted = false
+		rf.mu.Unlock()
 		return
 	}
 
@@ -173,6 +179,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	} else {
 		reply.VoteGranted = false
 	}
+	rf.mu.Unlock()
 }
 
 //
@@ -194,14 +201,21 @@ type AppendEntriesReply struct {
 // AppendEntries RPC Handler
 //
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	rf.mu.Lock()
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
+		rf.mu.Unlock()
 		rf.Demotion()
+	} else {
+		rf.mu.Unlock()
 	}
+	rf.mu.Lock()
 	if args.Term < rf.currentTerm {
 		reply.Success = false
+		rf.mu.Unlock()
 		return
 	}
+	rf.mu.Unlock()
 	rf.appendEntriesSignal <- 1
 }
 
@@ -430,8 +444,10 @@ func (follower *Follower) ProcessState(raft *Raft) NodeState {
 
 
 func (candidate Candidate) ProcessState(raft *Raft) NodeState {
+	raft.mu.Lock()
 	raft.currentTerm += 1
 	raft.votedFor = raft.me
+	raft.mu.Unlock()
 	timeout := time.After(getRandomElectionTimeout())
 	count := 1
 	receives := raft.gatherVotes()
@@ -439,7 +455,10 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 	for {
 		select {
 			case vote := <-receives:
-				if vote.Term > raft.currentTerm {
+				raft.mu.Lock()
+				currentTerm := raft.currentTerm
+				raft.mu.Unlock()
+				if vote.Term > currentTerm {
 					return newFollower()
 				}
 				if vote.VoteGranted {
