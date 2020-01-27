@@ -31,7 +31,25 @@ import "labrpc"
 // import "labgob"
 
 
-
+//type Log struct {
+//	contents []interface{}
+//	index int
+//}
+//
+//func newLog() *Log{
+//	return &Log{
+//		make([]interface{}, 10),
+//		0,
+//	}
+//
+//}
+//
+//func (log *Log) append(entry interface{}){
+//	if index >= len(contents) {
+//		newContents = make([]interface{}, 2 * len(log.contents))
+//
+//	}
+//}
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -67,7 +85,7 @@ type Raft struct {
 	currentTerm int
 	votedFor    int
 	NONE int
-	log	[]int
+	log	[]interface{}
 
 	commitIndex int
 	lastApplied int
@@ -219,14 +237,53 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	} else {
 		rf.mu.Unlock()
 	}
+	// 1.
 	rf.mu.Lock()
+	reply.Term = rf.currentTerm
 	if args.Term < rf.currentTerm {
 		reply.Success = false
 		rf.mu.Unlock()
 		return
 	}
+	if ele, ok := getElementAtPosition(rf.log, args.PrevLogIndex); ok {
+		// 2.
+		if ele != args.PrevLogTerm {
+			reply.Success = false
+			rf.mu.Unlock()
+			return
+		}
+	}
+
+	// 3 + 4.
+	for i := 0; i < len(args.Entries); i++ {
+		logNumber := args.PrevLogIndex + 1 + i
+		if logNumber < len(rf.log) {
+			rf.log[logNumber] = args.Entries[i]
+		} else {
+			rf.log = append(rf.log, args.Entries[i])
+		}
+	}
+	// 5.
+	if args.LeaderCommit > rf.commitIndex {
+		rf.commitIndex = min(args.LeaderCommit, len(rf.log))
+	}
+	reply.Success = true
+
 	rf.mu.Unlock()
 	rf.appendEntriesSignal <- 1
+}
+
+func getElementAtPosition(arr []interface{}, index int) (interface{}, bool){
+	if len(arr) >= index {
+		return -1, false
+	}
+	return arr[index], true
+}
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 //
