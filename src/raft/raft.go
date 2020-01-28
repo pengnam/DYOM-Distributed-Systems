@@ -85,7 +85,7 @@ type Raft struct {
 	currentTerm int
 	votedFor    int
 	NONE int
-	log	[]interface{}
+	log	[]LogEntry
 
 	commitIndex int
 	lastApplied int
@@ -159,7 +159,7 @@ type RequestVoteArgs struct {
 	Term int
 	CandidateId int
 	LastLogIndex int
-	LastLogTerm int
+	LastLogTerm interface{}
 }
 
 //
@@ -214,7 +214,7 @@ type AppendEntriesArgs struct {
 
 	PrevLogIndex int
 	PrevLogTerm int
-	Entries []int
+	Entries []LogEntry
 	LeaderCommit int
 }
 
@@ -225,11 +225,18 @@ type AppendEntriesReply struct {
 	Term int
 	Success bool
 }
+
+type LogEntry struct {
+	Item interface{}
+	Term int
+}
 //
 // AppendEntries RPC Handler
 //
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
+	fmt.Println("HERE")
+	fmt.Println(rf.me)
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
 		rf.mu.Unlock()
@@ -246,11 +253,24 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 	if ele, ok := getElementAtPosition(rf.log, args.PrevLogIndex); ok {
-		// 2.
-		if ele != args.PrevLogTerm {
+		// 2. term does not match
+		if ele.Term != args.PrevLogTerm {
 			reply.Success = false
 			rf.mu.Unlock()
 			return
+		}
+	} else {
+		// No element at position
+		print("FALSE")
+		reply.Success = false
+		rf.mu.Unlock()
+		return
+	}
+
+	// INVARIANT: args.PrevLogTerm should match
+	if ele, ok := getElementAtPosition(rf.log, args.PrevLogIndex); ok {
+		if ele.Term != args.PrevLogTerm {
+			panic("THIS SHOULD NOT WORK")
 		}
 	}
 
@@ -258,14 +278,19 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	for i := 0; i < len(args.Entries); i++ {
 		logNumber := args.PrevLogIndex + 1 + i
 		if logNumber < len(rf.log) {
-			rf.log[logNumber] = args.Entries[i]
+			if rf.log[logNumber].Term != args.Entries[i].Term {
+				rf.log = rf.log[:logNumber]
+				rf.log = append(rf.log, args.Entries[i])
+			}
 		} else {
 			rf.log = append(rf.log, args.Entries[i])
 		}
 	}
+
 	// 5.
+	// TODO: Decide if I need to apply the term on the FSM
 	if args.LeaderCommit > rf.commitIndex {
-		rf.commitIndex = min(args.LeaderCommit, len(rf.log))
+		rf.commitIndex = min(args.LeaderCommit, len(rf.log) - 1)
 	}
 	reply.Success = true
 
@@ -273,9 +298,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.appendEntriesSignal <- 1
 }
 
-func getElementAtPosition(arr []interface{}, index int) (interface{}, bool){
+func getElementAtPosition(arr []LogEntry, index int) (LogEntry, bool){
 	if len(arr) >= index {
-		return -1, false
+		return LogEntry{}, false
 	}
 	return arr[index], true
 }
@@ -379,11 +404,15 @@ func (rf *Raft) gatherVotes() <- chan RequestVoteReply{
 }
 
 func sendVoteHelper(i int, rf *Raft, fanIn chan RequestVoteReply) {
+	lastLogTerm := -1
+	if 0<= rf.lastApplied && rf.lastApplied < len(rf.log) {
+		lastLogTerm = rf.log[rf.lastApplied].Term
+	}
 	args := RequestVoteArgs{
 		rf.currentTerm,
 		rf.me,
 		rf.lastApplied,
-		rf.log[rf.lastApplied],
+		lastLogTerm,
 	}
 
 
@@ -415,7 +444,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.appendEntriesSignal = make(chan int)
 	rf.DemotionHelper = &dh
 	rf.applyCh = applyCh
-	rf.log = make([]int, 1)
+	rf.log = make([]LogEntry, 0)
+	rf.commitIndex = -1
+	rf.lastApplied = -1
 
 	// Your initialization code here (2A, 2B, 2C).
 	// FSM YO!!
@@ -482,9 +513,13 @@ type Leader struct {
 	matchIndex []int
 }
 
-func newLeader(numServers int) *Leader {
+func newLeader(numServers int, logLength int) *Leader {
+	nextIndexes := 	make([]int, numServers)
+	for i := 0; i < numServers; i++ {
+		nextIndexes[i] = logLength
+	}
 	return &Leader{
-		nextIndex: make([]int, numServers),
+		nextIndex: nextIndexes,
 		matchIndex: make([]int, numServers),
 	}
 }
@@ -549,7 +584,7 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 					count += 1
 					if count >= len(raft.peers)/2 {
 						fmt.Println(raft.me, " has ", count, " votes")
-						return newLeader(len(raft.peers))
+						return newLeader(len(raft.peers), len(raft.log))
 					}
 				}
 			case <-timeout:
@@ -566,7 +601,8 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 }
 
 func (leader Leader) ProcessState(raft *Raft) NodeState{
-	timeout := time.After(getRandomElectionTimeout())
+	// TODO: This timeout should be shorter
+	timeout := time.After(getRandomElectionTimeout()/4)
 	for {
 		select {
 			case <- raft.demoteChannel:
@@ -578,31 +614,59 @@ func (leader Leader) ProcessState(raft *Raft) NodeState{
 		}
 	}
 }
-
+// CURRENT: Heartbeat with append entries
 func (rf *Raft) updateLogEntries(leader *Leader) {
 	for i := 0; i <len(rf.peers); i += 1 {
 		if i != rf.me {
+			// 3. TODO: Missing leader number 3
+			lastLogIndex := len(rf.log) - 1
+			fmt.Println("CHECK ", i)
+			fmt.Println(lastLogIndex, leader.nextIndex[i])
 			go sendAppendEntriesHelper(i, rf, leader)
 		}
 	}
 }
 
 func sendAppendEntriesHelper(i int, rf *Raft, leader *Leader) {
-	firstMiss := leader.nextIndex[i]
-	args := AppendEntriesArgs{
-		rf.currentTerm,
-		rf.me,
-		firstMiss - 1,
-		rf.log[firstMiss],
-		rf.log[firstMiss:],
-		rf.commitIndex,
-	}
-	reply := AppendEntriesReply{}
-	rf.sendAppendEntries(i, &args, &reply)
+	for {
+		firstMiss := leader.nextIndex[i]
+		// TODO: When starting from log 0, what is this?
+		// TODO: When there is nothing to update... what happens?
+		prevLogTerm := -1
+		if 0 <= firstMiss-1 && firstMiss-1 < len(rf.log) {
+			prevLogTerm = rf.log[firstMiss-1].Term
+		}
+		entries := []LogEntry{}
+		if 0 <= firstMiss && firstMiss < len(rf.log) {
+			entries = rf.log[firstMiss:]
+		}
+		logLength := len(rf.log)
+		args := AppendEntriesArgs{
+			rf.currentTerm,
+			rf.me,
+			firstMiss - 1,
+			prevLogTerm,
+			entries,
+			rf.commitIndex,
+		}
+		reply := AppendEntriesReply{}
+		rf.sendAppendEntries(i, &args, &reply)
 
-	if reply.Term > rf.currentTerm {
-		rf.currentTerm = reply.Term
-		rf.Demotion()
+		if reply.Term > rf.currentTerm {
+			rf.currentTerm = reply.Term
+			rf.Demotion()
+			return
+		}
+		// 3a.
+		fmt.Println(rf.me, " sending to ", i, " status:")
+		fmt.Println(reply.Success)
+		if reply.Success || firstMiss - 1 == -1{
+			leader.nextIndex[i] = logLength
+			leader.matchIndex[i] = logLength
+			return
+		} else {
+			leader.nextIndex[i] -= 1
+		}
 	}
 }
 
