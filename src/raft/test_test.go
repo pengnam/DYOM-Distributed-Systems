@@ -189,7 +189,38 @@ func TestFailAgree2B(t *testing.T) {
 
 	cfg.end()
 }
+func TestSupp2B(t *testing.T) {
+	for i := 0; i < 10; i++ {
+		servers := 5
+		cfg := make_config(t, servers, false)
+		defer cfg.cleanup()
 
+		cfg.begin("Test (2B): no agreement if too many followers disconnect")
+
+		cfg.one(10, servers, false)
+		leader := cfg.checkOneLeader()
+		print(leader)
+
+		cfg.disconnect((leader + 1) % servers)
+		cfg.disconnect((leader + 2) % servers)
+		cfg.disconnect((leader + 3) % servers)
+
+		index, _, ok := cfg.rafts[leader].Start(20)
+		if ok != true {
+			t.Fatalf("leader rejected Start()")
+		}
+		if index != 2 {
+			t.Fatalf("expected index 2, got %v", index)
+		}
+		time.Sleep(2 * RaftElectionTimeout)
+
+		n, _ := cfg.nCommitted(index)
+		if n > 0 {
+			t.Fatalf("%v committed but no majority", n)
+		}
+		cfg.end()
+	}
+}
 func TestFailNoAgree2B(t *testing.T) {
 	servers := 5
 	cfg := make_config(t, servers, false)
