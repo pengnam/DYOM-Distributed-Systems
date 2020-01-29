@@ -31,25 +31,7 @@ import "labrpc"
 // import "labgob"
 
 
-//type Log struct {
-//	contents []interface{}
-//	index int
-//}
-//
-//func newLog() *Log{
-//	return &Log{
-//		make([]interface{}, 10),
-//		0,
-//	}
-//
-//}
-//
-//func (log *Log) append(entry interface{}){
-//	if index >= len(contents) {
-//		newContents = make([]interface{}, 2 * len(log.contents))
-//
-//	}
-//}
+
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -195,7 +177,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateId
 
-		// TODO: Verify this
 		if state, ok := rf.state.(*Follower); ok {
 			state.gotValidMessage = true
 		}
@@ -259,9 +240,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.mu.Unlock()
 			return
 		}
-	} else {
+	} else if (args.PrevLogIndex != -1){
 		// No element at position
-		print("FALSE")
 		reply.Success = false
 		rf.mu.Unlock()
 		return
@@ -286,6 +266,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.log = append(rf.log, args.Entries[i])
 		}
 	}
+	fmt.Println("Outcome of log for :", rf.me)
+	fmt.Println(rf.log)
 
 	// 5.
 	// TODO: Decide if I need to apply the term on the FSM
@@ -299,7 +281,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 }
 
 func getElementAtPosition(arr []LogEntry, index int) (LogEntry, bool){
-	if len(arr) >= index {
+	if index >= len(arr) || index < 0{
 		return LogEntry{}, false
 	}
 	return arr[index], true
@@ -361,16 +343,19 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	//if _, ok := rf.state.(*Leader); !ok {
-	//	// TODO: Return -1?
-	//	return -1, rf.currentTerm, false
-	//}
-
-	index := -1
-	term := -1
-	isLeader := true
-
-	return index, term, isLeader
+	rf.mu.Lock()
+	if _, ok := rf.state.(*Leader); !ok {
+		// TODO: Return -1?
+		rf.mu.Unlock()
+		return -1, rf.currentTerm, false
+	}
+	index := len(rf.log)
+	rf.log = append(rf.log, LogEntry{
+		Item: command,
+		Term: rf.currentTerm,
+	})
+	rf.mu.Unlock()
+	return index + 1, rf.currentTerm, true
 }
 
 //
@@ -414,7 +399,6 @@ func sendVoteHelper(i int, rf *Raft, fanIn chan RequestVoteReply) {
 		rf.lastApplied,
 		lastLogTerm,
 	}
-
 
 	reply := RequestVoteReply{}
 	rf.sendRequestVote(i, &args, &reply)
@@ -518,9 +502,14 @@ func newLeader(numServers int, logLength int) *Leader {
 	for i := 0; i < numServers; i++ {
 		nextIndexes[i] = logLength
 	}
+	matchIndexes := make([]int, numServers)
+	for i := 0; i < numServers; i++ {
+		matchIndexes[i] = -1
+	}
+
 	return &Leader{
 		nextIndex: nextIndexes,
-		matchIndex: make([]int, numServers),
+		matchIndex: matchIndexes,
 	}
 }
 
@@ -542,6 +531,9 @@ func getRandomElectionTimeout() time.Duration {
 func (follower *Follower) ProcessState(raft *Raft) NodeState {
 	timeout := time.After(getRandomElectionTimeout())
 	for {
+		if raft.lastApplied < raft.commitIndex {
+			applyLogs(raft)
+		}
 		select {
 			case <- raft.appendEntriesSignal:
 				follower.gotValidMessage = true
@@ -572,7 +564,11 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 	receives := raft.gatherVotes()
 
 	for {
+		if raft.lastApplied < raft.commitIndex {
+			applyLogs(raft)
+		}
 		select {
+
 			case vote := <-receives:
 				raft.mu.Lock()
 				currentTerm := raft.currentTerm
@@ -604,13 +600,16 @@ func (leader Leader) ProcessState(raft *Raft) NodeState{
 	// TODO: This timeout should be shorter
 	timeout := time.After(getRandomElectionTimeout()/4)
 	for {
+		if raft.lastApplied < raft.commitIndex {
+			applyLogs(raft)
+		}
 		select {
 			case <- raft.demoteChannel:
 				fmt.Println("Leader ", raft.me, " demoted")
 				return newFollower()
 			case <- timeout:
 				raft.updateLogEntries(&leader)
-				timeout = time.After(getRandomElectionTimeout())
+				timeout = time.After(getRandomElectionTimeout()/4)
 		}
 	}
 }
@@ -619,9 +618,6 @@ func (rf *Raft) updateLogEntries(leader *Leader) {
 	for i := 0; i <len(rf.peers); i += 1 {
 		if i != rf.me {
 			// 3. TODO: Missing leader number 3
-			lastLogIndex := len(rf.log) - 1
-			fmt.Println("CHECK ", i)
-			fmt.Println(lastLogIndex, leader.nextIndex[i])
 			go sendAppendEntriesHelper(i, rf, leader)
 		}
 	}
@@ -632,9 +628,10 @@ func sendAppendEntriesHelper(i int, rf *Raft, leader *Leader) {
 		firstMiss := leader.nextIndex[i]
 		// TODO: When starting from log 0, what is this?
 		// TODO: When there is nothing to update... what happens?
+		prevLogIndex := firstMiss - 1
 		prevLogTerm := -1
-		if 0 <= firstMiss-1 && firstMiss-1 < len(rf.log) {
-			prevLogTerm = rf.log[firstMiss-1].Term
+		if 0 <= prevLogIndex && prevLogIndex < len(rf.log) {
+			prevLogTerm = rf.log[prevLogIndex].Term
 		}
 		entries := []LogEntry{}
 		if 0 <= firstMiss && firstMiss < len(rf.log) {
@@ -644,7 +641,7 @@ func sendAppendEntriesHelper(i int, rf *Raft, leader *Leader) {
 		args := AppendEntriesArgs{
 			rf.currentTerm,
 			rf.me,
-			firstMiss - 1,
+			prevLogIndex,
 			prevLogTerm,
 			entries,
 			rf.commitIndex,
@@ -658,14 +655,58 @@ func sendAppendEntriesHelper(i int, rf *Raft, leader *Leader) {
 			return
 		}
 		// 3a.
-		fmt.Println(rf.me, " sending to ", i, " status:")
+		fmt.Println(rf.me, " sent ", i, " status:")
+		fmt.Printf("%+v\n", args)
+		fmt.Printf("%+v\n", reply)
+		fmt.Println("commit index: ", rf.commitIndex)
+		fmt.Println(leader.nextIndex)
+		fmt.Println(leader.matchIndex)
 		fmt.Println(reply.Success)
-		if reply.Success || firstMiss - 1 == -1{
+		if reply.Success || firstMiss == 0 {
 			leader.nextIndex[i] = logLength
-			leader.matchIndex[i] = logLength
+			leader.matchIndex[i] = logLength - 1
+			incrementCommitCheck(leader, rf)
 			return
 		} else {
 			leader.nextIndex[i] -= 1
+		}
+	}
+}
+//TODO: mutex this
+func incrementCommitCheck(leader *Leader, raft *Raft) {
+	for i := 0; i < len(leader.matchIndex); i++ {
+		val := leader.matchIndex[i]
+		found := false
+		if entry, ok := getElementAtPosition(raft.log, val); ok {
+			if entry.Term == raft.currentTerm {
+				found = true
+			}
+		}
+		if !found {
+			continue
+		}
+
+		currentCount := 0
+		for j := 0; j < len(leader.nextIndex); j++ {
+			if leader.matchIndex[i] >= val {
+				currentCount += 1
+			}
+		}
+		if currentCount >= len(leader.nextIndex)/2 {
+			if val > raft.commitIndex {
+				raft.commitIndex = val
+			}
+		}
+	}
+}
+
+func applyLogs(raft *Raft) {
+	for raft.lastApplied < raft.commitIndex {
+		raft.lastApplied += 1
+		raft.applyCh <- ApplyMsg{
+			CommandValid: true,
+			Command:      raft.log[raft.lastApplied].Item,
+			CommandIndex: raft.lastApplied + 1,
 		}
 	}
 }
