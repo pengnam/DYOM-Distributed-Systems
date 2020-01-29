@@ -683,7 +683,9 @@ func sendAppendEntriesHelper(i int, rf *Raft, leader *Leader) {
 			incrementCommitCheck(leader, rf)
 			return
 		} else {
-			leader.nextIndex[i] -= 1
+			if leader.nextIndex[i] > 0 {
+				leader.nextIndex[i] -= 1
+			}
 		}
 	}
 }
