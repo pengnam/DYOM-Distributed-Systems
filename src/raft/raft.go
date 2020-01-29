@@ -141,7 +141,7 @@ type RequestVoteArgs struct {
 	Term int
 	CandidateId int
 	LastLogIndex int
-	LastLogTerm interface{}
+	LastLogTerm int
 }
 
 //
@@ -172,7 +172,15 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
-	if rf.votedFor == rf.NONE || rf.votedFor == args.CandidateId{
+	lastLogIndex := len(rf.log) - 1
+	lastLogTerm := -1
+	if 0<=lastLogIndex && lastLogIndex < len(rf.log) {
+		lastLogTerm = rf.log[lastLogIndex].Term
+	}
+
+
+	if (rf.votedFor == rf.NONE || rf.votedFor == args.CandidateId) && upToDate(args.LastLogIndex, args.LastLogTerm, lastLogIndex, lastLogTerm){
+
 		fmt.Println(rf.me, " is voting for ", args.CandidateId)
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateId
@@ -186,6 +194,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Unlock()
 }
 
+/// True if a is more up to date (at least)
+func upToDate(lastLogIndexA int, lastLogTermA int, lastLogIndexB int, lastLogTermB int) bool{
+	if lastLogTermA != lastLogTermB {
+		return lastLogTermA > lastLogTermB
+	}
+	return lastLogIndexA >= lastLogIndexB
+}
 //
 // AppendEntries RPC arguments structure.
 //
