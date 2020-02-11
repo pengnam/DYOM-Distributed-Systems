@@ -1,7 +1,6 @@
 package raft
 
 //
-// this is an outline of the API that raft must expose to
 // the service (or tester). see comments below for
 // each of these functions for more details.
 //
@@ -21,7 +20,7 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
-	"sync"
+
 	"time"
 )
 import "sync/atomic"
@@ -54,7 +53,6 @@ type ApplyMsg struct {
 // A Go object implementing a single Raft peer.
 //
 type Raft struct {
-	mu        sync.Mutex          // Lock to protect shared access to this peer's state
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
@@ -62,7 +60,6 @@ type Raft struct {
 
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
-	// state a Raft server must maintain.
 	state       NodeState
 	currentTerm int
 	votedFor    int
@@ -156,18 +153,16 @@ type RequestVoteReply struct {
 // RequestVote RPC handler.
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	rf.mu.Lock()
+	fmt.Println("--------------------------------------")
+	fmt.Println("Request vote RPC from : ", args.CandidateId ," to ", rf.me)
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
-		rf.mu.Unlock()
-		fmt.Println("Process: ", args.CandidateId, " caused ", rf.me, " to be demoted")
+		fmt.Println(args.CandidateId, rf.me, "Process: ", args.CandidateId, " caused ", rf.me, " to be demoted")
 		rf.Demotion()
-		rf.mu.Lock()
 	}
 	reply.Term = rf.currentTerm
 	if args.Term < rf.currentTerm {
 		reply.VoteGranted = false
-		rf.mu.Unlock()
 		return
 	}
 
@@ -177,7 +172,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		lastLogTerm = rf.log[lastLogIndex].Term
 	}
 
-	fmt.Println("FOR ", rf.me, " AND ", args.CandidateId)
+	fmt.Println(args.CandidateId, rf.me, "FOR ", rf.me, " AND ", args.CandidateId)
 	if (rf.votedFor == rf.NONE || rf.votedFor == args.CandidateId) && upToDate(args.LastLogIndex, args.LastLogTerm, lastLogIndex, lastLogTerm){
 		fmt.Println(rf.me, " is voting for ", args.CandidateId)
 		reply.VoteGranted = true
@@ -190,13 +185,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	} else {
 		reply.VoteGranted = false
 	}
-	rf.mu.Unlock()
 }
 
 /// True if a is more up to date (at least)
 func upToDate(lastLogIndexA int, lastLogTermA int, lastLogIndexB int, lastLogTermB int) bool{
 	fmt.Println("Comparing: ", lastLogIndexA, lastLogTermA, lastLogIndexB, lastLogTermB)
 	if lastLogTermA != lastLogTermB {
+
 		return lastLogTermA > lastLogTermB
 	}
 	return lastLogIndexA >= lastLogIndexB
@@ -230,34 +225,30 @@ type LogEntry struct {
 // AppendEntries RPC Handler
 //
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	rf.mu.Lock()
+	fmt.Println("----------------------------------")
+	fmt.Println("Append entries from ", args.LeaderId, " to ", rf.me)
+	fmt.Printf("%d %d %+v\n", args.LeaderId, rf.me, args)
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
-		rf.mu.Unlock()
 		fmt.Println("Process: ", args.LeaderId, " caused ", rf.me, " to be demoted")
 		rf.Demotion()
 	} else {
-		rf.mu.Unlock()
 	}
 	// 1.
-	rf.mu.Lock()
 	reply.Term = rf.currentTerm
 	if args.Term < rf.currentTerm {
 		reply.Success = false
-		rf.mu.Unlock()
 		return
 	}
 	if ele, ok := getElementAtPosition(rf.log, args.PrevLogIndex); ok {
 		// 2. term does not match
 		if ele.Term != args.PrevLogTerm {
 			reply.Success = false
-			rf.mu.Unlock()
 			return
 		}
 	} else if (args.PrevLogIndex != -1){
 		// No element at position
 		reply.Success = false
-		rf.mu.Unlock()
 		return
 	}
 
@@ -268,6 +259,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 	}
 
+	fmt.Println(args.LeaderId, rf.me, "Previous log for :", rf.me)
+	fmt.Println(args.LeaderId, rf.me, rf.log)
 	// 3 + 4.
 	for i := 0; i < len(args.Entries); i++ {
 		logNumber := args.PrevLogIndex + 1 + i
@@ -280,18 +273,18 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.log = append(rf.log, args.Entries[i])
 		}
 	}
-	fmt.Println("Outcome of log for :", rf.me)
-	fmt.Println(rf.log)
+	fmt.Println(args.LeaderId, rf.me, "Outcome of log for :", rf.me)
+	fmt.Println(args.LeaderId, rf.me, rf.log)
 
 	// 5.
-	// TODO: Decide if I need to apply the term on the FSM
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, len(rf.log) - 1)
 	}
 	reply.Success = true
 
-	rf.mu.Unlock()
+	fmt.Printf("%d %d %+v\n", args.LeaderId, rf.me, reply)
 	rf.appendEntriesSignal <- 1
+	fmt.Printf("%d %d after append entries\n", args.LeaderId, rf.me)
 }
 
 func getElementAtPosition(arr []LogEntry, index int) (LogEntry, bool){
@@ -313,11 +306,9 @@ func min(a, b int) int {
 // expects RPC arguments in args.
 // fills in *reply with RPC reply, so caller should
 // pass &reply.
-// the types of the args and reply passed to Call() must be
 // the same as the types of the arguments declared in the
 // handler function (including whether they are pointers).
 //
-// The labrpc package simulates a lossy network, in which servers
 // may be unreachable, and in which requests and replies may be lost.
 // Call() sends a request and waits for a reply. If a reply arrives
 // within a timeout interval, Call() returns true; otherwise
@@ -357,19 +348,19 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	rf.mu.Lock()
 	if _, ok := rf.state.(*Leader); !ok {
 		// TODO: Return -1?
-		rf.mu.Unlock()
-		return -1, rf.currentTerm, false
+		return len(rf.log), rf.currentTerm, false
 	}
-	index := len(rf.log)
+	fmt.Println("CALLED START FOR ", rf.me, "WITH", command)
+	fmt.Println(rf.me, rf.log)
+
 	rf.log = append(rf.log, LogEntry{
 		Item: command,
 		Term: rf.currentTerm,
 	})
-	rf.mu.Unlock()
-	return index + 1, rf.currentTerm, true
+	return len(rf.log) , rf.currentTerm, true
+
 }
 
 //
@@ -427,7 +418,6 @@ func sendVoteHelper(i int, rf *Raft, fanIn chan RequestVoteReply) {
 // save its persistent state, and also initially holds the most
 // recent saved state, if any. applyCh is a channel on which the
 // tester or service expects Raft to send ApplyMsg messages.
-// Make() must return quickly, so it should start goroutines
 // for any long-running work.
 //
 func Make(peers []*labrpc.ClientEnd, me int,
@@ -438,7 +428,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 	rf.NONE = len(peers)
 	rf.votedFor = rf.NONE
-	dh := newDemotionHelper()
+	dh := newDemotionHelper(rf.me)
 	rf.appendEntriesSignal = make(chan int)
 	rf.DemotionHelper = &dh
 	rf.applyCh = applyCh
@@ -452,9 +442,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		rf.state = newFollower()
 		for {
 			fmt.Println("================NEW STATE=====================")
-			fmt.Println(rf.me)
+			fmt.Println("Id:",rf.me)
 			fmt.Println("Term: ", rf.currentTerm)
 			fmt.Println(reflect.TypeOf(rf.state))
+			fmt.Println(rf.log)
 			fmt.Println("==============================================")
 			rf.state = rf.state.ProcessState(rf)
 			rf.ResetDemotionState(rf)
@@ -473,22 +464,27 @@ type DemotionHelper struct {
 	 demoteChannel chan int
 	 isInProcessOfDemoting bool
 	 doneDemotion chan int
+	 id int
 }
 
-func newDemotionHelper() DemotionHelper{
+func newDemotionHelper(id int) DemotionHelper{
 	return DemotionHelper{
 		demoteChannel:         make(chan int),
 		isInProcessOfDemoting: false,
 		doneDemotion:make(chan int),
+		id: id,
 	}
 }
 
 func (dh *DemotionHelper) Demotion(){
 	// Sends to channel for Node to process
+	fmt.Printf("%d [demotion] Sending to demotion channel\n", dh.id)
 	dh.demoteChannel <- 1
+	fmt.Printf("%d [demotion] Sending to done demotion\n", dh.id)
 	// Waits until demotion is complete before continuing
 	dh.isInProcessOfDemoting = true
 	<- dh.doneDemotion
+	fmt.Printf("%d [demotion] After done demotion\n", dh.id)
 }
 
 func (dh *DemotionHelper) ResetDemotionState(raft *Raft) {
@@ -496,6 +492,7 @@ func (dh *DemotionHelper) ResetDemotionState(raft *Raft) {
 		dh.isInProcessOfDemoting = false
 		dh.doneDemotion <- 1
 		raft.votedFor = raft.NONE
+		fmt.Printf("%d [demotion] resetted \n", dh.id)
 	}
 }
 
@@ -539,7 +536,7 @@ func newFollower() *Follower {
 	}
 }
 func getRandomElectionTimeout() time.Duration {
-	dur := time.Duration(rand.Intn(250) + 100)
+	dur := time.Duration(rand.Intn(350) + 200)
 	return dur * time.Millisecond
 }
 
@@ -570,10 +567,8 @@ func (follower *Follower) ProcessState(raft *Raft) NodeState {
 
 
 func (candidate Candidate) ProcessState(raft *Raft) NodeState {
-	raft.mu.Lock()
 	raft.currentTerm += 1
 	raft.votedFor = raft.me
-	raft.mu.Unlock()
 	timeout := time.After(getRandomElectionTimeout())
 	count := 1
 	receives := raft.gatherVotes()
@@ -585,28 +580,30 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 		select {
 
 			case vote := <-receives:
-				raft.mu.Lock()
 				currentTerm := raft.currentTerm
-				raft.mu.Unlock()
 				if vote.Term > currentTerm {
-					raft.isInProcessOfDemoting = true
+					fmt.Printf("%d [candidate] is demoted from candidate cause it received vote of higher term\n", raft.me)
+					raft.votedFor = raft.NONE
 					return newFollower()
 				}
 				if vote.VoteGranted {
 					count += 1
-					if count >= len(raft.peers)/2 {
-						fmt.Println(raft.me, " has ", count, " votes")
+					fmt.Println(raft.me, " has ", count, " votes")
+					if float64(count) >= float64(len(raft.peers))/2 {
+						fmt.Printf("%d [candidate] is becoming leader\n", raft.me)
 						return newLeader(len(raft.peers), len(raft.log))
 					}
 				}
 			case <-timeout:
-				fmt.Println(raft.me, " is Tan Cheng Bok and is reelecting. Term: ", raft.currentTerm)
+				fmt.Println(raft.me, "[candidate] is reelecting. Term: ", raft.currentTerm)
 				// Restarts election
 				return newCandidate()
 			case <- raft.demoteChannel:
+				fmt.Printf("%d [candidate] is demoted from candidate\n", raft.me)
 				return newFollower()
 			case <- raft.appendEntriesSignal:
-				raft.isInProcessOfDemoting = true
+				fmt.Printf("%d [candidate] is demoted from candidate cause of append entries\n", raft.me)
+				raft.votedFor = raft.NONE
 				return newFollower()
 		}
 	}
@@ -616,7 +613,7 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 func (leader Leader) ProcessState(raft *Raft) NodeState{
 	// TODO: This timeout should be shorter
 	raft.updateLogEntries(&leader)
-	timeout := time.After(50*time.Millisecond)
+	timeout := time.After(100*time.Millisecond)
 	for {
 		if raft.lastApplied < raft.commitIndex {
 			applyLogs(raft)
@@ -627,7 +624,7 @@ func (leader Leader) ProcessState(raft *Raft) NodeState{
 				return newFollower()
 			case <- timeout:
 				raft.updateLogEntries(&leader)
-				timeout = time.After(50*time.Millisecond)
+				timeout = time.After(100*time.Millisecond)
 		}
 	}
 }
@@ -665,7 +662,13 @@ func sendAppendEntriesHelper(i int, rf *Raft, leader *Leader) {
 			rf.commitIndex,
 		}
 		reply := AppendEntriesReply{}
-		rf.sendAppendEntries(i, &args, &reply)
+		ok := rf.sendAppendEntries(i, &args, &reply)
+		fmt.Printf("%d %d reply: %+v\n", rf.me, i, reply)
+
+		if !ok {
+			fmt.Println(rf.me, i, "FAILED RPC")
+		}
+
 
 		if reply.Term > rf.currentTerm {
 			rf.currentTerm = reply.Term
@@ -677,27 +680,24 @@ func sendAppendEntriesHelper(i int, rf *Raft, leader *Leader) {
 		//fmt.Println(rf.me, " sent ", i, " status:")
 		//fmt.Printf("%+v\n", args)
 		//fmt.Printf("%+v\n", reply)
-		//fmt.Println("commit index: ", rf.commitIndex)
-		//fmt.Println(leader.nextIndex)
-		//fmt.Println("MATCH:")
-		//fmt.Println(leader.matchIndex)
 		//fmt.Println(reply.Success)
 		if reply.Success {
 			leader.nextIndex[i] = logLength
 			leader.matchIndex[i] = logLength - 1
 			incrementCommitCheck(leader, rf)
+			fmt.Println(rf.me, i, "commit index: ", rf.commitIndex)
+			fmt.Println(rf.me, i, "NEXT", leader.nextIndex)
+			fmt.Println(rf.me, i, "MATCH", leader.matchIndex)
 			return
 		} else {
-			if len(entries) == 0 {
-				return
-			}
 			if leader.nextIndex[i] > 0 {
 				leader.nextIndex[i] -= 1
+			} else {
+				return
 			}
 		}
 	}
 }
-//TODO: mutex this
 func incrementCommitCheck(leader *Leader, raft *Raft) {
 	for i := 0; i < len(leader.matchIndex); i++ {
 		val := leader.matchIndex[i]
@@ -719,6 +719,7 @@ func incrementCommitCheck(leader *Leader, raft *Raft) {
 		}
 		if float64(currentCount) >= float64(len(leader.nextIndex))/2 {
 			if val > raft.commitIndex {
+				fmt.Println(raft.me, "incremented commit index")
 				raft.commitIndex = val
 			}
 		}
