@@ -17,7 +17,10 @@ package raft
 //
 
 import (
+	"bytes"
 	"fmt"
+	"labgob"
+	"log"
 	"math/rand"
 	"reflect"
 
@@ -29,6 +32,8 @@ import "labrpc"
 // import "bytes"
 // import "labgob"
 
+
+// NOTE: Should have used the defer statement
 
 
 
@@ -65,6 +70,7 @@ type Raft struct {
 	votedFor    int
 	NONE int
 	log	[]LogEntry
+	Die chan int
 
 	commitIndex int
 	lastApplied int
@@ -97,12 +103,13 @@ func (rf *Raft) GetState() (int, bool) {
 func (rf *Raft) persist() {
 	// Your code here (2C).
 	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 
@@ -113,19 +120,24 @@ func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
+
 	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+
+	var currentTerm int
+	var votedFor int
+	var logEntries []LogEntry
+	if d.Decode(&currentTerm) != nil ||
+	   d.Decode(&votedFor) != nil ||
+		d.Decode(&logEntries) != nil{
+		log.Fatal("There is a problem")
+
+	} else {
+	  rf.currentTerm = currentTerm
+	  rf.votedFor = votedFor
+	  rf.log = logEntries
+	}
 }
 
 
@@ -153,6 +165,8 @@ type RequestVoteReply struct {
 // RequestVote RPC handler.
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
+	// PERSIST
+	rf.persist()
 	fmt.Println("--------------------------------------")
 	fmt.Println("Request vote RPC from : ", args.CandidateId ," to ", rf.me)
 	if args.Term > rf.currentTerm {
@@ -225,6 +239,8 @@ type LogEntry struct {
 // AppendEntries RPC Handler
 //
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	// PERSIST
+	rf.persist()
 	fmt.Println("----------------------------------")
 	fmt.Println("Append entries from ", args.LeaderId, " to ", rf.me)
 	fmt.Printf("%d %d %+v\n", args.LeaderId, rf.me, args)
@@ -237,17 +253,20 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// 1.
 	reply.Term = rf.currentTerm
 	if args.Term < rf.currentTerm {
+		fmt.Println(args.LeaderId, " ", rf.me, "leader has a lower term than me")
 		reply.Success = false
 		return
 	}
 	if ele, ok := getElementAtPosition(rf.log, args.PrevLogIndex); ok {
 		// 2. term does not match
 		if ele.Term != args.PrevLogTerm {
+			fmt.Println(args.LeaderId, " ", rf.me, "leader and I don't have matching log terms")
 			reply.Success = false
 			return
 		}
 	} else if (args.PrevLogIndex != -1){
 		// No element at position
+		fmt.Println(args.LeaderId, " ", rf.me, "No element at position")
 		reply.Success = false
 		return
 	}
@@ -374,8 +393,10 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // to suppress debug output from a Kill()ed instance.
 //
 func (rf *Raft) Kill() {
+	rf.Die <- 1
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
+
 }
 
 func (rf *Raft) killed() bool {
@@ -395,13 +416,14 @@ func (rf *Raft) gatherVotes() <- chan RequestVoteReply{
 
 func sendVoteHelper(i int, rf *Raft, fanIn chan RequestVoteReply) {
 	lastLogTerm := -1
-	if 0<= rf.lastApplied && rf.lastApplied < len(rf.log) {
-		lastLogTerm = rf.log[rf.lastApplied].Term
+	lastLogIndex := len(rf.log) - 1
+	if 0<= lastLogIndex && lastLogIndex < len(rf.log) {
+		lastLogTerm = rf.log[lastLogIndex].Term
 	}
 	args := RequestVoteArgs{
 		rf.currentTerm,
 		rf.me,
-		rf.lastApplied,
+		lastLogIndex,
 		lastLogTerm,
 	}
 
@@ -433,6 +455,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.DemotionHelper = &dh
 	rf.applyCh = applyCh
 	rf.log = make([]LogEntry, 0)
+	rf.Die = make(chan int)
 	rf.commitIndex = -1
 	rf.lastApplied = -1
 
@@ -446,9 +469,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			fmt.Println("Term: ", rf.currentTerm)
 			fmt.Println(reflect.TypeOf(rf.state))
 			fmt.Println(rf.log)
+			fmt.Println("Voting for: ", rf.votedFor)
 			fmt.Println("==============================================")
 			rf.state = rf.state.ProcessState(rf)
 			rf.ResetDemotionState(rf)
+			if rf.state == nil {
+				return
+			}
 		}
 	}()
 
@@ -555,11 +582,15 @@ func (follower *Follower) ProcessState(raft *Raft) NodeState {
 			case <- timeout:
 				if follower.gotValidMessage {
 					fmt.Println(raft.me, " is demoted because it received a hearbeat")
+					// Note: There is no reset of voting here because we want the follower to still be voting for lead
 					return newFollower()
 				} else {
 					fmt.Println(raft.me, "did not get the right message")
 					return newCandidate()
 				}
+			case <- raft.Die:
+				fmt.Println("Dying", raft.me)
+				return nil
 		}
 	}
 	return nil
@@ -578,10 +609,8 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 			applyLogs(raft)
 		}
 		select {
-
 			case vote := <-receives:
-				currentTerm := raft.currentTerm
-				if vote.Term > currentTerm {
+				if vote.Term > raft.currentTerm {
 					fmt.Printf("%d [candidate] is demoted from candidate cause it received vote of higher term\n", raft.me)
 					raft.votedFor = raft.NONE
 					return newFollower()
@@ -600,11 +629,15 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 				return newCandidate()
 			case <- raft.demoteChannel:
 				fmt.Printf("%d [candidate] is demoted from candidate\n", raft.me)
+				raft.votedFor = raft.NONE
 				return newFollower()
 			case <- raft.appendEntriesSignal:
 				fmt.Printf("%d [candidate] is demoted from candidate cause of append entries\n", raft.me)
 				raft.votedFor = raft.NONE
 				return newFollower()
+			case <- raft.Die:
+				fmt.Println("Dying", raft.me)
+				return nil
 		}
 	}
 	return nil
@@ -625,6 +658,9 @@ func (leader Leader) ProcessState(raft *Raft) NodeState{
 			case <- timeout:
 				raft.updateLogEntries(&leader)
 				timeout = time.After(100*time.Millisecond)
+			case <- raft.Die:
+				fmt.Println("Dying", raft.me)
+				return nil
 		}
 	}
 }
