@@ -225,9 +225,9 @@ type LogEntry struct {
 // AppendEntries RPC Handler
 //
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	fmt.Println("----------------------------------")
-	fmt.Println("Append entries from ", args.LeaderId, " to ", rf.me)
-	fmt.Printf("%d %d %+v\n", args.LeaderId, rf.me, args)
+	//fmt.Println("----------------------------------")
+	//fmt.Println("Append entries from ", args.LeaderId, " to ", rf.me)
+	//fmt.Printf("%d %d %+v\n", args.LeaderId, rf.me, args)
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
 		fmt.Println("Process: ", args.LeaderId, " caused ", rf.me, " to be demoted")
@@ -259,8 +259,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 	}
 
-	fmt.Println(args.LeaderId, rf.me, "Previous log for :", rf.me)
-	fmt.Println(args.LeaderId, rf.me, rf.log)
+	//fmt.Println(args.LeaderId, rf.me, "Previous log for :", rf.me)
+	//fmt.Println(args.LeaderId, rf.me, rf.log)
 	// 3 + 4.
 	for i := 0; i < len(args.Entries); i++ {
 		logNumber := args.PrevLogIndex + 1 + i
@@ -274,7 +274,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 	}
 	fmt.Println(args.LeaderId, rf.me, "Outcome of log for :", rf.me)
-	fmt.Println(args.LeaderId, rf.me, rf.log)
+	//fmt.Println(args.LeaderId, rf.me, rf.log)
 
 	// 5.
 	if args.LeaderCommit > rf.commitIndex {
@@ -613,7 +613,7 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 func (leader Leader) ProcessState(raft *Raft) NodeState{
 	// TODO: This timeout should be shorter
 	raft.updateLogEntries(&leader)
-	timeout := time.After(100*time.Millisecond)
+	timeout := time.After(60*time.Millisecond)
 	for {
 		if raft.lastApplied < raft.commitIndex {
 			applyLogs(raft)

@@ -28,10 +28,10 @@ type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
-	Opcode int
-	Key string
-	Value string
-	Server int
+	Opcode   int
+	Key      string
+	Value    string
+	ClientId int
 	Sequence int
 }
 
@@ -42,12 +42,12 @@ type KVServer struct {
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
 	dead    int32 // set by Kill()
-	sequence int32
 
 
 	maxraftstate int // snapshot if log grows this big
 	values map[string]string
-	returnValues map[int] chan int
+	returnValues map[string] chan int
+	seenArgs map[int] int
 }
 
 
@@ -61,7 +61,13 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		reply.Err = ErrWrongLeader
 		return
 	}
-	<- channel
+	// TODO: Add timeout
+
+	<-channel
+	//select {
+	//	case :
+	//	case <- time.After(200 * time.Millisecond):
+	//}
 
 	reply.Err = OK
 
@@ -87,23 +93,43 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		return
 	}
 
-	<- channel
+	<-channel
+	//select {
+	//case <-channel:
+	//case <- time.After(200 * time.Millisecond):
+	//}
 	reply.Err = OK
 
 }
 
+func (kv *KVServer) checkRepeat(clientId int, seq int) bool{
+	if latestSeen, ok := kv.seenArgs[clientId]; ok {
+		if latestSeen >= seq {
+			return true
+		}
+	}
+	kv.seenArgs[clientId] = seq
+	return false
+}
+
+
+func getKey(client int, seq int) string {
+	return fmt.Sprintf("%d %d", client, seq)
+}
+
 func (kv *KVServer) tryOp(op Op) chan int{
 	// TODO: RETRIES??
-	op.Server = kv.me
-	op.Sequence = int(kv.getSequenceNumber())
-
 	_, _, leader := kv.rf.Start(op)
 	if !leader {
 		return nil
 	}
-	fmt.Println(op.Opcode, "OP for server", kv.me, ":", op.Key, op.Value)
+	if val, ok := kv.returnValues[getKey(op.ClientId, op.Sequence)]; ok {
+		fmt.Println("There is a problem here")
+		return val
+	}
+	fmt.Println(op.Opcode, "OP for server", kv.me, ":", "Key", op.Key, "Val", op.Value)
 	channel := make(chan int)
-	kv.returnValues[op.Sequence] = channel
+	kv.returnValues[getKey(op.ClientId, op.Sequence)] = channel
 	return channel
 }
 
@@ -114,17 +140,14 @@ func (kv *KVServer) tryOp(op Op) chan int{
 func (kv *KVServer) handleApplyChan() {
 	for {
 		message := <- kv.applyCh
-		op := message.Command.(Op)
-		seq := op.Sequence
-		if op.Server == kv.me {
-			if channel, ok := kv.returnValues[seq]; ok {
-				channel <- 1
-				delete(kv.returnValues, seq)
-			} else {
-				log.Fatal("NO CHANNEL FOR SEQUENCE: ", seq, "AT", kv.me)
-			}
-		}
 		kv.mu.Lock()
+		op := message.Command.(Op)
+		fmt.Println("ClientId", kv.me, "is handling", op.Opcode, op.Key, op.Value)
+		id := getKey(op.ClientId, op.Sequence)
+		//if kv.checkRepeat(op.ClientId, op.Sequence) {
+		//	kv.mu.Unlock()
+		//	continue
+		//}
 		switch op.Opcode {
 		case GetCommand:
 		case PutCommand:
@@ -136,13 +159,14 @@ func (kv *KVServer) handleApplyChan() {
 				kv.values[op.Key] = op.Value
 			}
 		}
+		if channel, ok := kv.returnValues[id]; ok {
+			channel <- 1
+			delete(kv.returnValues, id)
+		}
 		kv.mu.Unlock()
 	}
 }
 
-func (kv *KVServer) getSequenceNumber() int32 {
-	return atomic.AddInt32(&kv.sequence, 1)
-}
 
 
 //
@@ -194,8 +218,9 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
-	kv.returnValues = make(map[int] chan int)
+	kv.returnValues = make(map[string] chan int)
 	kv.values = make(map[string] string)
+	kv.seenArgs = make(map[int] int)
 
 	go kv.handleApplyChan()
 

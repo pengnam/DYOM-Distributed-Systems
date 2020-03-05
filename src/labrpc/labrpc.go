@@ -421,7 +421,7 @@ func (rs *Server) dispatch(req reqMsg) replyMsg {
 		for k, _ := range rs.services {
 			choices = append(choices, k)
 		}
-		log.Fatalf("labrpc.Server.dispatch(): unknown service %v in %v.%v; expecting one of %v\n",
+		log.Fatalf("labrpc.ClientId.dispatch(): unknown service %v in %v.%v; expecting one of %v\n",
 			serviceName, serviceName, methodName, choices)
 		return replyMsg{false, nil}
 	}

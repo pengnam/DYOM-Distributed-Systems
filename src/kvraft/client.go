@@ -1,8 +1,9 @@
 package kvraft
-
+// TODO: There is a problem. If I timeout for a get or put request, it might be out of sync with later sequences anyway
 import (
 	"fmt"
 	"labrpc"
+	"sync/atomic"
 	"time"
 )
 import "crypto/rand"
@@ -12,6 +13,8 @@ import "math/big"
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
+	id int
+	sequenceNumber int32
 }
 
 func nrand() int64 {
@@ -21,12 +24,20 @@ func nrand() int64 {
 	return x
 }
 
+var clerkId int32 = 0
+
+func getClerkId() int {
+	return int(atomic.AddInt32(&clerkId, 1))
+}
+
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	// You'll have to add code here.
+	ck.id  = getClerkId()
 	return ck
 }
+
 
 //
 // fetch the current value for a key.
@@ -44,6 +55,8 @@ func (ck *Clerk) Get(key string) string {
 	fmt.Println("Clerk - Get - " + key)
 	args := GetArgs{
 		Key:key,
+		Client: ck.id,
+		SequenceNumber: ck.getSequenceNumber(),
 	}
 	reply := GetReply{}
 	for j := 0; j < 2; j += 1 {
@@ -59,11 +72,16 @@ func (ck *Clerk) Get(key string) string {
 			}
 		}
 		<- time.After(200 * time.Millisecond)
+		fmt.Println("Clerk - Get - " + key, "RETRY")
 	}
 	fmt.Println("Clerk - Get - " + key, "FAIL")
 
 	// TODO: When there are no leaders
 	return ""
+}
+
+func (ck *Clerk) getSequenceNumber() int{
+	return int(atomic.AddInt32(&ck.sequenceNumber, 1))
 }
 
 //
@@ -82,6 +100,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		Key:  key,
 		Value: value,
 		Op:    op,
+		Client: ck.id,
+		SequenceNumber: ck.getSequenceNumber(),
 	}
 	reply := PutAppendReply{}
 	for j := 0; j < 2; j += 1 {
@@ -91,11 +111,11 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			ck.servers[i].Call("KVServer.PutAppend", &args, &reply)
 			if reply.Err == OK {
 				fmt.Println("Clerk -", op, "-", key, "-", value, "-", "SUCCESS AT", i)
-
 				return
 			}
 		}
 		<- time.After(200 * time.Millisecond)
+		fmt.Println("Clerk -", op,"-", key, "-", value, "-", "RETRY")
 	}
 	fmt.Println("Clerk -", op,"-", key, "-", value, "-", "FAIL")
 }
