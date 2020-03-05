@@ -1,6 +1,10 @@
 package kvraft
 
-import "labrpc"
+import (
+	"fmt"
+	"labrpc"
+	"time"
+)
 import "crypto/rand"
 import "math/big"
 
@@ -37,8 +41,24 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) Get(key string) string {
+	fmt.Println("Clerk - Get - " + key)
+	args := GetArgs{
+		Key:key,
+	}
+	reply := GetReply{}
+	for j := 0; j < 2; j += 1 {
+		for i := 0; i < len(ck.servers); i += 1 {
+			ck.servers[i].Call("KVServer.Get", &args, &reply)
 
-	// You will have to modify this function.
+			if reply.Err == OK {
+				fmt.Println("Clerk - Get - "+key, "SUCCESS AT", i)
+				return reply.Value
+			}
+		}
+		<- time.After(150 * time.Millisecond)
+	}
+	fmt.Println("Clerk - Get - " + key, "FAIL")
+	// TODO: When there are no leaders
 	return ""
 }
 
@@ -53,7 +73,27 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	// You will have to modify this function.
+	fmt.Println("Clerk -", op,"-", key, "-", value)
+	args := PutAppendArgs{
+		Key:  key,
+		Value: value,
+		Op:    op,
+	}
+	reply := PutAppendReply{}
+	for j := 0; j < 2; j += 1 {
+		for i := 0; i < len(ck.servers); i += 1 {
+
+			fmt.Println("Clerk -", op,"-", key, "-", value, "- trying", i)
+			ck.servers[i].Call("KVServer.PutAppend", &args, &reply)
+			if reply.Err == OK {
+				fmt.Println("Clerk -", op, "-", key, "-", value, "-", "SUCCESS AT", i)
+
+				return
+			}
+		}
+		<- time.After(150 * time.Millisecond)
+	}
+	fmt.Println("Clerk -", op,"-", key, "-", value, "-", "FAIL")
 }
 
 func (ck *Clerk) Put(key string, value string) {

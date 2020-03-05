@@ -18,12 +18,20 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-
+const (  // iota is reset to 0
+	GetCommand = iota  // c0 == 0
+	PutCommand = iota  // c1 == 1
+	AppendCommand = iota  // c2 == 2
+)
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Opcode int
+	Key string
+	Value string
 }
+
 
 type KVServer struct {
 	mu      sync.Mutex
@@ -33,18 +41,87 @@ type KVServer struct {
 	dead    int32 // set by Kill()
 
 	maxraftstate int // snapshot if log grows this big
-
-	// Your definitions here.
+	values map[string]string
+	returnValues map[int] chan int
 }
 
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
+	channel := kv.tryOp(Op {
+		Opcode: GetCommand,
+		Key: args.Key,
+		Value: "",
+	})
+	if channel == nil {
+		reply.Err = ErrWrongLeader
+		return
+	}
+	<- channel
+
+	reply.Err = OK
+
+	reply.Value = kv.values[args.Key]
+}
+func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
+	op := PutCommand
+	if args.Op == "Append" {
+		op = AppendCommand
+	}
+	channel := kv.tryOp(Op{
+		Key: args.Key,
+		Value: args.Value,
+		Opcode: op,
+	})
+
+	if channel == nil {
+		reply.Err = ErrWrongLeader
+		return
+	}
+
+	<- channel
+	reply.Err = OK
+
 }
 
-func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
+func (kv *KVServer) tryOp(op Op) chan int{
+	// RETRIES??
+	index, _, leader := kv.rf.Start(op)
+	if !leader {
+		return nil
+	}
+	channel := make(chan int)
+	kv.returnValues[index] = channel
+	return channel
 }
+
+
+
+
+
+func (kv *KVServer) handleApplyChan() {
+	for {
+		message := <- kv.applyCh
+		op := message.Command.(Op)
+		seq := message.CommandIndex
+		if channel, ok := kv.returnValues[seq]; ok {
+			channel <- 1
+			delete(kv.returnValues, seq)
+		}
+		switch op.Opcode {
+		case GetCommand:
+			continue
+		case PutCommand:
+			kv.values[op.Key] = op.Value
+		case AppendCommand:
+			if _, ok := kv.values[op.Key]; ok{
+				kv.values[op.Key] += op.Value
+			} else {
+				kv.values[op.Key] = op.Value
+			}
+		}
+	}
+}
+
 
 //
 // the tester calls Kill() when a KVServer instance won't
@@ -94,6 +171,11 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
+	kv.returnValues = make(map[int] chan int)
+	kv.values = make(map[string] string)
+
+	go kv.handleApplyChan()
+
 
 	// You may need initialization code here.
 
