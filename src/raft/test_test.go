@@ -647,29 +647,37 @@ func TestPersist22C(t *testing.T) {
 	cfg.begin("Test (2C): more persistence")
 
 	index := 1
-	for iters := 0; iters < 5; iters++ {
+	for iters := 0; iters < 1; iters++ {
+		fmt.Println("Finished iteration:  ", iters)
 		cfg.one(10+index, servers, true)
 		index++
-
+		// 1. Basic agreement
 		leader1 := cfg.checkOneLeader()
 
+		// These should turn to candidates or remain as followers
 		cfg.disconnect((leader1 + 1) % servers)
+		// These should turn to candidates or remain as followers
 		cfg.disconnect((leader1 + 2) % servers)
 
+		// 2. Agree when two followers are disconnected
 		cfg.one(10+index, servers-2, true)
 		index++
-
+		// Disconnect everyone except the two disconnected followers
 		cfg.disconnect((leader1 + 0) % servers)
 		cfg.disconnect((leader1 + 3) % servers)
 		cfg.disconnect((leader1 + 4) % servers)
 
+		// Two follower are refreshed
 		cfg.start1((leader1 + 1) % servers)
 		cfg.start1((leader1 + 2) % servers)
 		cfg.connect((leader1 + 1) % servers)
 		cfg.connect((leader1 + 2) % servers)
 
 		time.Sleep(RaftElectionTimeout)
-
+		// After timeout, we should NOT have a new leader.
+		// The two followers should be candidates/leader
+		fmt.Println("*******************************************")
+		// Add one of the followers back to the list. This follow should be the leader
 		cfg.start1((leader1 + 3) % servers)
 		cfg.connect((leader1 + 3) % servers)
 

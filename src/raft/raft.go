@@ -76,7 +76,7 @@ type Raft struct {
 	lastApplied int
 
 	appendEntriesSignal chan int
-	applyCh chan ApplyMsg
+	applyCh             chan ApplyMsg
 
 	*DemotionHelper
 }
@@ -177,6 +177,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.Term = rf.currentTerm
 	if args.Term < rf.currentTerm {
 		reply.VoteGranted = false
+		fmt.Println(args.CandidateId, rf.me, " Candidate has a poor lower term: ", args.Term, " vs ", rf.currentTerm)
 		return
 	}
 
@@ -562,13 +563,18 @@ func newFollower() *Follower {
 		gotValidMessage: false,
 	}
 }
+
+func getRandomFollowerTimeout() time.Duration {
+	dur := time.Duration(rand.Intn(100) + 50)
+	return dur * time.Millisecond
+}
 func getRandomElectionTimeout() time.Duration {
-	dur := time.Duration(rand.Intn(350) + 200)
+	dur := time.Duration(rand.Intn(100) + 0)
 	return dur * time.Millisecond
 }
 
 func (follower *Follower) ProcessState(raft *Raft) NodeState {
-	timeout := time.After(getRandomElectionTimeout())
+	timeout := time.After(getRandomFollowerTimeout())
 	for {
 		if raft.lastApplied < raft.commitIndex {
 			applyLogs(raft)
@@ -600,7 +606,7 @@ func (follower *Follower) ProcessState(raft *Raft) NodeState {
 func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 	raft.currentTerm += 1
 	raft.votedFor = raft.me
-	timeout := time.After(getRandomElectionTimeout())
+	timeout := time.After(getRandomFollowerTimeout())
 	count := 1
 	receives := raft.gatherVotes()
 
@@ -646,7 +652,7 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 func (leader Leader) ProcessState(raft *Raft) NodeState{
 	// TODO: This timeout should be shorter
 	raft.updateLogEntries(&leader)
-	timeout := time.After(100*time.Millisecond)
+	timeout := time.After(40*time.Millisecond)
 	for {
 		if raft.lastApplied < raft.commitIndex {
 			applyLogs(raft)
@@ -657,7 +663,7 @@ func (leader Leader) ProcessState(raft *Raft) NodeState{
 				return newFollower()
 			case <- timeout:
 				raft.updateLogEntries(&leader)
-				timeout = time.After(100*time.Millisecond)
+				timeout = time.After(40*time.Millisecond)
 			case <- raft.Die:
 				fmt.Println("Dying", raft.me)
 				return nil
