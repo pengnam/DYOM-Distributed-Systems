@@ -1,6 +1,7 @@
 package kvraft
 
 import (
+	"fmt"
 	"labgob"
 	"labrpc"
 	"log"
@@ -30,6 +31,8 @@ type Op struct {
 	Opcode int
 	Key string
 	Value string
+	Server int
+	Sequence int
 }
 
 
@@ -39,6 +42,8 @@ type KVServer struct {
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
 	dead    int32 // set by Kill()
+	sequence int32
+
 
 	maxraftstate int // snapshot if log grows this big
 	values map[string]string
@@ -60,7 +65,11 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 	reply.Err = OK
 
-	reply.Value = kv.values[args.Key]
+	if val, ok := kv.values[args.Key]; ok {
+		reply.Value = val
+	} else {
+		reply.Err = ErrNoKey
+	}
 }
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	op := PutCommand
@@ -84,13 +93,17 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 }
 
 func (kv *KVServer) tryOp(op Op) chan int{
-	// RETRIES??
-	index, _, leader := kv.rf.Start(op)
+	// TODO: RETRIES??
+	op.Server = kv.me
+	op.Sequence = int(kv.getSequenceNumber())
+
+	_, _, leader := kv.rf.Start(op)
 	if !leader {
 		return nil
 	}
+	fmt.Println(op.Opcode, "OP for server", kv.me, ":", op.Key, op.Value)
 	channel := make(chan int)
-	kv.returnValues[index] = channel
+	kv.returnValues[op.Sequence] = channel
 	return channel
 }
 
@@ -102,14 +115,18 @@ func (kv *KVServer) handleApplyChan() {
 	for {
 		message := <- kv.applyCh
 		op := message.Command.(Op)
-		seq := message.CommandIndex
-		if channel, ok := kv.returnValues[seq]; ok {
-			channel <- 1
-			delete(kv.returnValues, seq)
+		seq := op.Sequence
+		if op.Server == kv.me {
+			if channel, ok := kv.returnValues[seq]; ok {
+				channel <- 1
+				delete(kv.returnValues, seq)
+			} else {
+				log.Fatal("NO CHANNEL FOR SEQUENCE: ", seq, "AT", kv.me)
+			}
 		}
+		kv.mu.Lock()
 		switch op.Opcode {
 		case GetCommand:
-			continue
 		case PutCommand:
 			kv.values[op.Key] = op.Value
 		case AppendCommand:
@@ -119,7 +136,12 @@ func (kv *KVServer) handleApplyChan() {
 				kv.values[op.Key] = op.Value
 			}
 		}
+		kv.mu.Unlock()
 	}
+}
+
+func (kv *KVServer) getSequenceNumber() int32 {
+	return atomic.AddInt32(&kv.sequence, 1)
 }
 
 
@@ -166,6 +188,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv := new(KVServer)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
+	kv.mu = sync.Mutex{}
 
 	// You may need initialization code here.
 

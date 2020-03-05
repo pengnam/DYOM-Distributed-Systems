@@ -53,11 +53,15 @@ func (ck *Clerk) Get(key string) string {
 			if reply.Err == OK {
 				fmt.Println("Clerk - Get - "+key, "SUCCESS AT", i)
 				return reply.Value
+			} else if reply.Err == ErrNoKey {
+				fmt.Println("Clerk - Get - "+key, "NO KEY", i)
+				return ""
 			}
 		}
-		<- time.After(150 * time.Millisecond)
+		<- time.After(200 * time.Millisecond)
 	}
 	fmt.Println("Clerk - Get - " + key, "FAIL")
+
 	// TODO: When there are no leaders
 	return ""
 }
@@ -91,7 +95,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 				return
 			}
 		}
-		<- time.After(150 * time.Millisecond)
+		<- time.After(200 * time.Millisecond)
 	}
 	fmt.Println("Clerk -", op,"-", key, "-", value, "-", "FAIL")
 }
