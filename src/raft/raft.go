@@ -189,7 +189,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 /// True if a is more up to date (at least)
 func upToDate(lastLogIndexA int, lastLogTermA int, lastLogIndexB int, lastLogTermB int) bool{
-	fmt.Println("Comparing: ", lastLogIndexA, lastLogTermA, lastLogIndexB, lastLogTermB)
+	//fmt.Println("Comparing: ", lastLogIndexA, lastLogTermA, lastLogIndexB, lastLogTermB)
 	if lastLogTermA != lastLogTermB {
 
 		return lastLogTermA > lastLogTermB
@@ -273,7 +273,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.log = append(rf.log, args.Entries[i])
 		}
 	}
-	fmt.Println(args.LeaderId, rf.me, "Outcome of log for :", rf.me)
+	//fmt.Println(args.LeaderId, rf.me, "Outcome of log for :", rf.me)
 	//fmt.Println(args.LeaderId, rf.me, rf.log)
 
 	// 5.
@@ -282,7 +282,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 	reply.Success = true
 
-	fmt.Printf("%d %d %+v\n", args.LeaderId, rf.me, reply)
+	//fmt.Printf("%d %d %+v\n", args.LeaderId, rf.me, reply)
 	rf.appendEntriesSignal <- 1
 	fmt.Printf("%d %d after append entries\n", args.LeaderId, rf.me)
 }
@@ -353,7 +353,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		return len(rf.log), rf.currentTerm, false
 	}
 	fmt.Println("CALLED START FOR ", rf.me, "WITH", command)
-	fmt.Println(rf.me, rf.log)
+	//fmt.Println(rf.me, rf.log)
 
 	rf.log = append(rf.log, LogEntry{
 		Item: command,
@@ -478,13 +478,13 @@ func newDemotionHelper(id int) DemotionHelper{
 
 func (dh *DemotionHelper) Demotion(){
 	// Sends to channel for Node to process
-	fmt.Printf("%d [demotion] Sending to demotion channel\n", dh.id)
+	//fmt.Printf("%d [demotion] Sending to demotion channel\n", dh.id)
 	dh.demoteChannel <- 1
-	fmt.Printf("%d [demotion] Sending to done demotion\n", dh.id)
+	//fmt.Printf("%d [demotion] Sending to done demotion\n", dh.id)
 	// Waits until demotion is complete before continuing
 	dh.isInProcessOfDemoting = true
 	<- dh.doneDemotion
-	fmt.Printf("%d [demotion] After done demotion\n", dh.id)
+	//fmt.Printf("%d [demotion] After done demotion\n", dh.id)
 }
 
 func (dh *DemotionHelper) ResetDemotionState(raft *Raft) {
@@ -492,7 +492,7 @@ func (dh *DemotionHelper) ResetDemotionState(raft *Raft) {
 		dh.isInProcessOfDemoting = false
 		dh.doneDemotion <- 1
 		raft.votedFor = raft.NONE
-		fmt.Printf("%d [demotion] resetted \n", dh.id)
+		//fmt.Printf("%d [demotion] resetted \n", dh.id)
 	}
 }
 
@@ -550,14 +550,14 @@ func (follower *Follower) ProcessState(raft *Raft) NodeState {
 			case <- raft.appendEntriesSignal:
 				follower.gotValidMessage = true
 			case <- raft.demoteChannel:
-				fmt.Println(raft.me, " is demoted because it received an rpc request of a higher term")
+				//fmt.Println(raft.me, " is demoted because it received an rpc request of a higher term")
 				return newFollower()
 			case <- timeout:
 				if follower.gotValidMessage {
-					fmt.Println(raft.me, " is demoted because it received a hearbeat")
+					//fmt.Println(raft.me, " is demoted because it received a hearbeat")
 					return newFollower()
 				} else {
-					fmt.Println(raft.me, "did not get the right message")
+					//fmt.Println(raft.me, "did not get the right message")
 					return newCandidate()
 				}
 		}
@@ -582,27 +582,27 @@ func (candidate Candidate) ProcessState(raft *Raft) NodeState {
 			case vote := <-receives:
 				currentTerm := raft.currentTerm
 				if vote.Term > currentTerm {
-					fmt.Printf("%d [candidate] is demoted from candidate cause it received vote of higher term\n", raft.me)
+					//fmt.Printf("%d [candidate] is demoted from candidate cause it received vote of higher term\n", raft.me)
 					raft.votedFor = raft.NONE
 					return newFollower()
 				}
 				if vote.VoteGranted {
 					count += 1
-					fmt.Println(raft.me, " has ", count, " votes")
+					//fmt.Println(raft.me, " has ", count, " votes")
 					if float64(count) >= float64(len(raft.peers))/2 {
-						fmt.Printf("%d [candidate] is becoming leader\n", raft.me)
+						//fmt.Printf("%d [candidate] is becoming leader\n", raft.me)
 						return newLeader(len(raft.peers), len(raft.log))
 					}
 				}
 			case <-timeout:
-				fmt.Println(raft.me, "[candidate] is reelecting. Term: ", raft.currentTerm)
+				//fmt.Println(raft.me, "[candidate] is reelecting. Term: ", raft.currentTerm)
 				// Restarts election
 				return newCandidate()
 			case <- raft.demoteChannel:
-				fmt.Printf("%d [candidate] is demoted from candidate\n", raft.me)
+				//fmt.Printf("%d [candidate] is demoted from candidate\n", raft.me)
 				return newFollower()
 			case <- raft.appendEntriesSignal:
-				fmt.Printf("%d [candidate] is demoted from candidate cause of append entries\n", raft.me)
+				//fmt.Printf("%d [candidate] is demoted from candidate cause of append entries\n", raft.me)
 				raft.votedFor = raft.NONE
 				return newFollower()
 		}
@@ -620,7 +620,7 @@ func (leader Leader) ProcessState(raft *Raft) NodeState{
 		}
 		select {
 			case <- raft.demoteChannel:
-				fmt.Println("Leader ", raft.me, " demoted")
+				//fmt.Println("Leader ", raft.me, " demoted")
 				return newFollower()
 			case <- timeout:
 				raft.updateLogEntries(&leader)
@@ -663,10 +663,10 @@ func sendAppendEntriesHelper(i int, rf *Raft, leader *Leader) {
 		}
 		reply := AppendEntriesReply{}
 		ok := rf.sendAppendEntries(i, &args, &reply)
-		fmt.Printf("%d %d reply: %+v\n", rf.me, i, reply)
+		//fmt.Printf("%d %d reply: %+v\n", rf.me, i, reply)
 
 		if !ok {
-			fmt.Println(rf.me, i, "FAILED RPC")
+			//fmt.Println(rf.me, i, "FAILED RPC")
 		}
 
 
@@ -685,9 +685,9 @@ func sendAppendEntriesHelper(i int, rf *Raft, leader *Leader) {
 			leader.nextIndex[i] = logLength
 			leader.matchIndex[i] = logLength - 1
 			incrementCommitCheck(leader, rf)
-			fmt.Println(rf.me, i, "commit index: ", rf.commitIndex)
-			fmt.Println(rf.me, i, "NEXT", leader.nextIndex)
-			fmt.Println(rf.me, i, "MATCH", leader.matchIndex)
+			//fmt.Println(rf.me, i, "commit index: ", rf.commitIndex)
+			//fmt.Println(rf.me, i, "NEXT", leader.nextIndex)
+			//fmt.Println(rf.me, i, "MATCH", leader.matchIndex)
 			return
 		} else {
 			if leader.nextIndex[i] > 0 {

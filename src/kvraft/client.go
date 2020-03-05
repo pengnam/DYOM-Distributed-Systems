@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"labrpc"
 	"sync/atomic"
-	"time"
 )
 import "crypto/rand"
 import "math/big"
@@ -15,6 +14,7 @@ type Clerk struct {
 	// You will have to modify this struct.
 	id int
 	sequenceNumber int32
+	leader int
 }
 
 func nrand() int64 {
@@ -35,6 +35,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck.servers = servers
 	// You'll have to add code here.
 	ck.id  = getClerkId()
+	ck.leader = 0
 	return ck
 }
 
@@ -58,21 +59,17 @@ func (ck *Clerk) Get(key string) string {
 		Client: ck.id,
 		SequenceNumber: ck.getSequenceNumber(),
 	}
-	reply := GetReply{}
-	for j := 0; j < 2; j += 1 {
-		for i := 0; i < len(ck.servers); i += 1 {
-			ck.servers[i].Call("KVServer.Get", &args, &reply)
+	for ;;ck.leader = (ck.leader + 1) % len(ck.servers) {
+		reply := GetReply{}
+		ok  := ck.servers[ck.leader].Call("KVServer.Get", &args, &reply)
 
-			if reply.Err == OK {
-				fmt.Println("Clerk - Get - "+key, "SUCCESS AT", i)
-				return reply.Value
-			} else if reply.Err == ErrNoKey {
-				fmt.Println("Clerk - Get - "+key, "NO KEY", i)
-				return ""
-			}
+		if ok && reply.Err == OK {
+			fmt.Println("Clerk - Get - "+key, "SUCCESS AT server", ck.leader)
+			return reply.Value
+		} else if reply.Err == ErrNoKey {
+			fmt.Println("Clerk - Get - "+key, "NO KEY", ck.leader)
+			return ""
 		}
-		<- time.After(200 * time.Millisecond)
-		fmt.Println("Clerk - Get - " + key, "RETRY")
 	}
 	fmt.Println("Clerk - Get - " + key, "FAIL")
 
@@ -103,19 +100,15 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		Client: ck.id,
 		SequenceNumber: ck.getSequenceNumber(),
 	}
-	reply := PutAppendReply{}
-	for j := 0; j < 2; j += 1 {
-		for i := 0; i < len(ck.servers); i += 1 {
+	for ;;ck.leader = (ck.leader + 1) % len(ck.servers) {
+		reply := PutAppendReply{}
 
-			fmt.Println("Clerk -", op,"-", key, "-", value, "- trying", i)
-			ck.servers[i].Call("KVServer.PutAppend", &args, &reply)
-			if reply.Err == OK {
-				fmt.Println("Clerk -", op, "-", key, "-", value, "-", "SUCCESS AT", i)
-				return
-			}
+		fmt.Println("Clerk -", op,"-", key, "-", value, "- trying", ck.leader)
+		ck.servers[ck.leader].Call("KVServer.PutAppend", &args, &reply)
+		if reply.Err == OK {
+			fmt.Println("Clerk -", op, "-", key, "-", value, "-", "SUCCESS AT", ck.leader)
+			return
 		}
-		<- time.After(200 * time.Millisecond)
-		fmt.Println("Clerk -", op,"-", key, "-", value, "-", "RETRY")
 	}
 	fmt.Println("Clerk -", op,"-", key, "-", value, "-", "FAIL")
 }

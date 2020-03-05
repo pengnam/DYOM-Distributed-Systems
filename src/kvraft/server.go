@@ -8,6 +8,7 @@ import (
 	"raft"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const Debug = 0
@@ -52,10 +53,13 @@ type KVServer struct {
 
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
+
 	channel := kv.tryOp(Op {
 		Opcode: GetCommand,
 		Key: args.Key,
 		Value: "",
+		ClientId: args.Client,
+		Sequence: args.SequenceNumber,
 	})
 	if channel == nil {
 		reply.Err = ErrWrongLeader
@@ -63,11 +67,11 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	}
 	// TODO: Add timeout
 
-	<-channel
-	//select {
-	//	case :
-	//	case <- time.After(200 * time.Millisecond):
-	//}
+	//<-channel
+	select {
+		case <-channel:
+		case <- time.After(500 * time.Millisecond):
+	}
 
 	reply.Err = OK
 
@@ -86,6 +90,8 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		Key: args.Key,
 		Value: args.Value,
 		Opcode: op,
+		ClientId: args.Client,
+		Sequence: args.SequenceNumber,
 	})
 
 	if channel == nil {
@@ -93,11 +99,11 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		return
 	}
 
-	<-channel
-	//select {
-	//case <-channel:
-	//case <- time.After(200 * time.Millisecond):
-	//}
+	//<-channel
+	select {
+	case <-channel:
+	case <- time.After(500 * time.Millisecond):
+	}
 	reply.Err = OK
 
 }
@@ -142,12 +148,12 @@ func (kv *KVServer) handleApplyChan() {
 		message := <- kv.applyCh
 		kv.mu.Lock()
 		op := message.Command.(Op)
-		fmt.Println("ClientId", kv.me, "is handling", op.Opcode, op.Key, op.Value)
+		fmt.Printf("Client %d Handling message: %+v\n",kv.me, op)
 		id := getKey(op.ClientId, op.Sequence)
-		//if kv.checkRepeat(op.ClientId, op.Sequence) {
-		//	kv.mu.Unlock()
-		//	continue
-		//}
+		if kv.checkRepeat(op.ClientId, op.Sequence) {
+			kv.mu.Unlock()
+			continue
+		}
 		switch op.Opcode {
 		case GetCommand:
 		case PutCommand:
