@@ -143,6 +143,7 @@ func (rf *Raft) readPersist(data []byte) {
 	  rf.currentTerm = currentTerm
 	  rf.votedFor = votedFor
 	  rf.log = logEntries
+	  fmt.Printf("Something is working %+v\n", rf)
 	}
 }
 
@@ -172,7 +173,7 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// PERSIST
-	rf.persist()
+	defer rf.persist()
 	fmt.Println("--------------------------------------")
 	fmt.Println("Request vote RPC from : ", args.CandidateId ," to ", rf.me)
 	if args.Term > rf.currentTerm {
@@ -190,7 +191,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	lastLogIndex := rf.getLastLogIndex()
 	lastLogTerm := rf.getLastLogTerm()
 
-	fmt.Println(args.CandidateId, rf.me, "FOR ", rf.me, " AND ", args.CandidateId)
 	if (rf.votedFor == rf.NONE || rf.votedFor == args.CandidateId) && upToDate(args.LastLogIndex, args.LastLogTerm, lastLogIndex, lastLogTerm){
 		fmt.Println(rf.me, " is voting for ", args.CandidateId)
 		reply.VoteGranted = true
@@ -205,7 +205,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 }
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
-
+	fmt.Println("Not supposed to happen")
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
 		rf.Demotion()
@@ -489,7 +489,7 @@ func (rf *Raft) getLastLogIndex() int {
 }
 func (rf *Raft) sendVoteHelper(i int, fanIn chan RequestVoteReply) {
 	lastLogTerm := rf.getLastLogTerm()
-	lastLogIndex := rf.getLastLogTerm()
+	lastLogIndex := rf.getLastLogIndex()
 	args := RequestVoteArgs{
 		rf.currentTerm,
 		rf.me,
@@ -550,7 +550,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	}()
 
 	// initialize from state persisted before a crash
+	fmt.Println("READING FROM PREVIOUS STATE")
 	rf.readPersist(persister.ReadRaftState())
+	rf.recoverFromSnapshot(persister.ReadSnapshot())
+	rf.persist()
 	return rf
 }
 
@@ -741,6 +744,7 @@ func (leader Leader) ProcessState(raft *Raft) NodeState{
 }
 // CURRENT: Heartbeat with append entries
 func (rf *Raft) updateLogEntries(leader *Leader) {
+	rf.persist()
 	for i := 0; i <len(rf.peers); i += 1 {
 		if i != rf.me {
 			// 3. TODO: Missing leader number 3
@@ -872,4 +876,19 @@ func applyLogs(raft *Raft) {
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
+}
+func (rf *Raft) recoverFromSnapshot(snapshot []byte) {
+	if snapshot == nil || len(snapshot) < 1 {
+		return
+	}
+
+	var lastIncludedIndex, lastIncludedTerm int
+	r := bytes.NewBuffer(snapshot)
+	d := labgob.NewDecoder(r)
+	d.Decode(&lastIncludedIndex)
+	d.Decode(&lastIncludedTerm)
+
+	rf.lastApplied = lastIncludedIndex
+	rf.commitIndex = lastIncludedIndex
+	//rf.trimLog(lastIncludedIndex, lastIncludedTerm)
 }
